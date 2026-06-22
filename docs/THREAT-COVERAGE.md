@@ -7,6 +7,7 @@ on the control — the gap this repo closes by enforcing it.
 | Project A threat | Control in this repo | Where | Spec status |
 |------------------|----------------------|-------|-------------|
 | Card spoofing / shadowing (a stranger serves a card claiming to be us) | Identity pinning: the verifier requires the signing cert's URI SAN to equal the expected workflow identity; an unpinned verifier is rejected by default | `verifier.py` (`IdentityMismatch`) | Recommended, not mandated |
+| Forged self-signed cert carrying the right URI SAN | Optional trust anchoring: with a configured `trust_root`, the leaf must chain to a trusted Fulcio root (validity + CA constraints + signature at each hop) and its Fulcio OIDC-issuer extension must match; a self-signed cert is rejected. Absent a trust root, the hermetic self-signed path is kept | `trust.py`, `verifier.py` (`UntrustedCertificate`) | Silent |
 | Card tampering via DNS/CDN compromise (bytes altered in transit) | Detached JWS over the JCS canonical card: any one-byte change fails verification | `signer.py`, `verifier.py` (`BadSignature`) | Signature recommended in v1.0 |
 | Signature present but never publicly logged (undetectable key misuse) | Rekor inclusion is fetched and bound to the artifact digest and signature being verified — not assumed from a header index; required by default | `rekor.py`, `verifier.py` (`MissingRekorEntry`) | Silent |
 | Long-lived signing key theft | Keyless signing: Fulcio short-lived certs, no persisted private key | `keyless.py`, `sign-card.yml` | Silent |

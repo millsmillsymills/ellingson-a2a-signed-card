@@ -48,10 +48,19 @@ def generate_signing_material(
     return key, cert
 
 
-def cert_to_x5c(cert: x509.Certificate) -> list[str]:
-    """Return the base64-encoded DER chain for a JWS ``x5c`` header."""
-    der = cert.public_bytes(encoding=serialization.Encoding.DER)
-    return [base64.b64encode(der).decode("ascii")]
+def cert_to_x5c(cert: x509.Certificate, *intermediates: x509.Certificate) -> list[str]:
+    """Return the base64-encoded DER ``x5c`` chain, leaf first.
+
+    Args:
+        cert: The leaf signing certificate.
+        intermediates: Any chain certificates to append after the leaf, in
+            order toward the root.
+    """
+    chain = (cert, *intermediates)
+    return [
+        base64.b64encode(c.public_bytes(encoding=serialization.Encoding.DER)).decode("ascii")
+        for c in chain
+    ]
 
 
 def x5c_to_cert(x5c_entry: str) -> x509.Certificate:

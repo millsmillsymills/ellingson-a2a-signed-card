@@ -27,10 +27,12 @@ from ellingson_card.errors import (
     IdentityMismatch,
     MissingRekorEntry,
     MissingSignature,
+    UntrustedCertificate,
 )
 from ellingson_card.keys import identity_from_cert, x5c_to_cert
 from ellingson_card.rekor import entry_binds, fetch_entry_body
 from ellingson_card.signer import signing_input
+from ellingson_card.trust import TrustRoot, oidc_issuer, verify_chain
 
 _COORD_BYTES = 32
 
@@ -99,6 +101,28 @@ def _check_freshness(cert: x509.Certificate, max_age: timedelta | None) -> None:
         raise CardExpired(f"signature older than max age {max_age}")
 
 
+def _intermediates(signature: dict[str, Any]) -> list[x509.Certificate]:
+    try:
+        return [x5c_to_cert(entry) for entry in signature["header"]["x5c"][1:]]
+    except (KeyError, IndexError, ValueError, TypeError) as exc:
+        raise BadSignature(f"malformed x5c chain: {exc}") from exc
+
+
+def _enforce_trust(
+    signature: dict[str, Any],
+    cert: x509.Certificate,
+    trust_root: TrustRoot,
+    expected_oidc_issuer: str | None,
+) -> None:
+    verify_chain(cert, _intermediates(signature), trust_root, at_time=datetime.now(UTC))
+    if expected_oidc_issuer is not None:
+        issuer = oidc_issuer(cert)
+        if issuer != expected_oidc_issuer:
+            raise UntrustedCertificate(
+                f"expected OIDC issuer {expected_oidc_issuer!r}, got {issuer!r}"
+            )
+
+
 def verify_card(
     card_json: dict[str, Any],
     *,
@@ -106,6 +130,8 @@ def verify_card(
     require_rekor: bool = True,
     rekor_checker: RekorChecker = default_rekor_checker,
     max_age: timedelta | None = None,
+    trust_root: TrustRoot | None = None,
+    expected_oidc_issuer: str | None = None,
 ) -> VerifyResult:
     """Verify a signed Agent Card, failing closed with a distinct error per control.
 
@@ -116,13 +142,18 @@ def verify_card(
         rekor_checker: Predicate confirming a Rekor entry at a log index binds to
             the artifact digest and DER signature being verified.
         max_age: If set, reject signatures whose cert is older than this.
+        trust_root: If set, cryptographically anchor trust by chaining the leaf
+            to a trusted Fulcio root; a self-signed cert is then rejected. When
+            absent, the hermetic self-signed-friendly path is kept unchanged.
+        expected_oidc_issuer: If set (with ``trust_root``), require the Fulcio
+            OIDC-issuer extension to equal this value.
 
     Returns:
         A ``VerifyResult`` on success.
 
     Raises:
         MissingSignature, BadSignature, IdentityMismatch, CardExpired,
-        MissingRekorEntry: On the corresponding failure.
+        UntrustedCertificate, MissingRekorEntry: On the corresponding failure.
     """
     signatures = card_json.get("signatures")
     if not signatures:
@@ -137,6 +168,9 @@ def verify_card(
         raise IdentityMismatch(f"expected identity {expected_identity!r}, got {identity!r}")
 
     _check_freshness(cert, max_age)
+
+    if trust_root is not None:
+        _enforce_trust(signature, cert, trust_root, expected_oidc_issuer)
 
     rekor_log_index = signature["header"].get("rekorLogIndex")
     if require_rekor:

@@ -1,7 +1,11 @@
 import base64
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
 
 import ellingson_card.verifier as verifier_mod
 from ellingson_card.errors import (
@@ -10,13 +14,16 @@ from ellingson_card.errors import (
     IdentityMismatch,
     MissingRekorEntry,
     MissingSignature,
+    UntrustedCertificate,
 )
-from ellingson_card.keys import generate_signing_material
+from ellingson_card.keys import cert_to_x5c, generate_signing_material
 from ellingson_card.rekor import entry_binds
 from ellingson_card.signer import attach_signature, sign_card
+from ellingson_card.trust import FULCIO_OIDC_ISSUER_OID, TrustRoot
 from ellingson_card.verifier import verify_card
 
 IDENTITY = "https://github.com/ellingson/signed-card/.github/workflows/sign.yml@refs/heads/main"
+OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 CARD = {"name": "a", "version": "1", "skills": [{"id": "s"}]}
 
 
@@ -24,6 +31,51 @@ def _signed(identity=IDENTITY, rekor_log_index=None):
     key, cert = generate_signing_material(identity)
     sig = sign_card(CARD, key, cert, rekor_log_index=rekor_log_index)
     return attach_signature(CARD, sig)
+
+
+def _ca_root():
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "fulcio-test-root")])
+    now = datetime.now(UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    return key, cert
+
+
+def _ca_signed(identity=IDENTITY, oidc_issuer=OIDC_ISSUER):
+    root_key, root = _ca_root()
+    leaf_key = ec.generate_private_key(ec.SECP256R1())
+    now = datetime.now(UTC)
+    builder = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "leaf")]))
+        .issuer_name(root.subject)
+        .public_key(leaf_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.SubjectAlternativeName([x509.UniformResourceIdentifier(identity)]), critical=False
+        )
+    )
+    if oidc_issuer is not None:
+        builder = builder.add_extension(
+            x509.UnrecognizedExtension(FULCIO_OIDC_ISSUER_OID, oidc_issuer.encode()), critical=False
+        )
+    leaf = builder.sign(root_key, hashes.SHA256())
+    sig = sign_card(CARD, leaf_key, leaf, rekor_log_index=None)
+    sig["header"]["x5c"] = cert_to_x5c(leaf)
+    return attach_signature(CARD, sig), TrustRoot((root,))
 
 
 def test_valid_card_verifies():
@@ -157,3 +209,45 @@ def test_expired_card_fails_closed():
             require_rekor=False,
             max_age=timedelta(seconds=0),
         )
+
+
+def test_self_signed_rejected_when_trust_root_configured():
+    _, root = _ca_root()
+    signed = _signed()
+    with pytest.raises(UntrustedCertificate):
+        verify_card(
+            signed,
+            expected_identity=IDENTITY,
+            require_rekor=False,
+            trust_root=TrustRoot((root,)),
+        )
+
+
+def test_ca_issued_cert_verifies_against_trust_root():
+    signed, trust_root = _ca_signed()
+    result = verify_card(
+        signed,
+        expected_identity=IDENTITY,
+        require_rekor=False,
+        trust_root=trust_root,
+        expected_oidc_issuer=OIDC_ISSUER,
+    )
+    assert result.valid
+
+
+def test_oidc_issuer_mismatch_rejected():
+    signed, trust_root = _ca_signed(oidc_issuer="https://evil.example")
+    with pytest.raises(UntrustedCertificate):
+        verify_card(
+            signed,
+            expected_identity=IDENTITY,
+            require_rekor=False,
+            trust_root=trust_root,
+            expected_oidc_issuer=OIDC_ISSUER,
+        )
+
+
+def test_local_demo_path_unchanged_without_trust_root():
+    signed = _signed(rekor_log_index=7)
+    result = verify_card(signed, expected_identity=IDENTITY, rekor_checker=lambda *_a: True)
+    assert result.valid
