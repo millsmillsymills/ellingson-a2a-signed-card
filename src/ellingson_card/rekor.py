@@ -1,25 +1,33 @@
-"""Rekor transparency-log inclusion check.
+"""Rekor transparency-log inclusion check, bound to the signature being verified.
 
-Confirms a signature's Rekor log entry actually exists, rather than assuming it
-from the presence of a log index in the signature header. Queries the public
-Rekor v1 REST API directly so we do not depend on Sigstore's private client.
+Confirming an entry merely *exists* at a log index is too weak: an attacker who
+already holds one validly logged signature could paste any real index into a
+forged card's header and pass. So this module fetches the entry body and binds it
+to the artifact hash and signature bytes under verification — the index must
+point at a ``hashedrekord`` whose logged signature and artifact digest match the
+signature we are checking. Queries the public Rekor v1 REST API directly so we do
+not depend on Sigstore's private client.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import urllib.error
 import urllib.request
+from typing import Any
 
 DEFAULT_REKOR_URL = "https://rekor.sigstore.dev"
 
 
-def rekor_entry_exists(
+def fetch_entry_body(
     log_index: int,
     *,
     base_url: str = DEFAULT_REKOR_URL,
     timeout: float = 10.0,
-) -> bool:
-    """Return whether a Rekor entry exists at ``log_index``.
+) -> dict[str, Any] | None:
+    """Fetch and decode the Rekor entry body at ``log_index``.
 
     Args:
         log_index: The transparency-log index recorded in the signature header.
@@ -27,7 +35,8 @@ def rekor_entry_exists(
         timeout: HTTP timeout in seconds.
 
     Returns:
-        True if the entry is present (HTTP 200), False if absent (HTTP 404).
+        The decoded entry body (a ``hashedrekord`` dict) if present, or ``None``
+        if no entry exists at the index (HTTP 404) or the response is malformed.
 
     Raises:
         urllib.error.URLError: On network failure (the verifier then fails closed
@@ -36,8 +45,70 @@ def rekor_entry_exists(
     url = f"{base_url}/api/v1/log/entries?logIndex={int(log_index)}"
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310
-            return response.status == 200
+            if response.status != 200:
+                return None
+            raw = response.read()
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
-            return False
+            return None
         raise
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None
+    return _decode_body(payload)
+
+
+def _decode_body(payload: Any) -> dict[str, Any] | None:
+    if not isinstance(payload, dict) or not payload:
+        return None
+    entry = next(iter(payload.values()))
+    if not isinstance(entry, dict):
+        return None
+    raw_body = entry.get("body")
+    if not isinstance(raw_body, str):
+        return None
+    try:
+        body = json.loads(base64.b64decode(raw_body))
+    except (binascii.Error, ValueError):
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def entry_binds(
+    body: dict[str, Any],
+    *,
+    artifact_sha256_hex: str,
+    signature_der: bytes,
+) -> bool:
+    """Return whether a Rekor entry body binds to this artifact and signature.
+
+    The entry must be a ``hashedrekord`` whose logged artifact digest equals
+    ``artifact_sha256_hex`` and whose logged signature equals ``signature_der``.
+    A mismatch (or any structural surprise) returns ``False`` so the verifier
+    fails closed.
+    """
+    if body.get("kind") != "hashedrekord":
+        return False
+    spec = body.get("spec")
+    if not isinstance(spec, dict):
+        return False
+    logged_hash = _dig(spec, "data", "hash", "value")
+    if logged_hash != artifact_sha256_hex:
+        return False
+    logged_sig = _dig(spec, "signature", "content")
+    if not isinstance(logged_sig, str):
+        return False
+    try:
+        return base64.b64decode(logged_sig) == signature_der
+    except (binascii.Error, ValueError):
+        return False
+
+
+def _dig(mapping: dict[str, Any], *keys: str) -> Any:
+    current: Any = mapping
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current

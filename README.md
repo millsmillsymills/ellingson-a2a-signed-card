@@ -67,7 +67,9 @@ verification runs with `--no-require-rekor` while identity pinning stays on.
 The real provenance path runs in [`.github/workflows/sign-card.yml`](.github/workflows/sign-card.yml):
 Sigstore keyless signing produces a Fulcio cert and a Rekor entry, and the card
 is then verified with **Rekor inclusion required** and the workflow identity
-pinned. "Rekor inclusion is checked, not assumed" — the verifier queries the log.
+pinned. "Rekor inclusion is checked, not assumed" — the verifier fetches the log
+entry and binds it to the artifact digest and signature it is verifying, so a
+real-but-unrelated log index in the header cannot satisfy the check.
 
 ## Why not `sigstore-a2a`?
 

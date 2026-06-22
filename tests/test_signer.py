@@ -49,6 +49,6 @@ def test_assemble_keyless_signature_verifies():
     cert_der = cert.public_bytes(serialization.Encoding.DER)
     sig = assemble_keyless_signature(protected, der, cert_der, rekor_log_index=99)
     signed = attach_signature(CARD, sig)
-    result = verify_card(signed, expected_identity=IDENTITY, rekor_checker=lambda _i: True)
+    result = verify_card(signed, expected_identity=IDENTITY, rekor_checker=lambda *_a: True)
     assert result.valid
     assert result.rekor_log_index == 99
