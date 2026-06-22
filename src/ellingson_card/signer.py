@@ -30,9 +30,14 @@ def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
-def signing_input(card: dict[str, Any], protected_b64: str) -> bytes:
+def protected_b64() -> str:
+    """Return the base64url-encoded ES256 JWS protected header."""
+    return _b64url(json.dumps({"alg": "ES256"}, separators=(",", ":")).encode())
+
+
+def signing_input(card: dict[str, Any], protected: str) -> bytes:
     """Return the JWS signing input for a card with the given protected header."""
-    return f"{protected_b64}.{_b64url(canonicalize(card))}".encode("ascii")
+    return f"{protected}.{_b64url(canonicalize(card))}".encode("ascii")
 
 
 def _der_to_raw(der_signature: bytes) -> bytes:
@@ -57,15 +62,44 @@ def sign_card(
     Returns:
         ``{"protected", "signature", "header"}`` per A2A v1.0 §4.4.7.
     """
-    protected_b64 = _b64url(json.dumps({"alg": "ES256"}, separators=(",", ":")).encode())
-    der = key.sign(signing_input(card, protected_b64), ec.ECDSA(hashes.SHA256()))
+    protected = protected_b64()
+    der = key.sign(signing_input(card, protected), ec.ECDSA(hashes.SHA256()))
     header: dict[str, Any] = {"x5c": cert_to_x5c(cert)}
     if rekor_log_index is not None:
         header["rekorLogIndex"] = rekor_log_index
     return {
-        "protected": protected_b64,
+        "protected": protected,
         "signature": _b64url(_der_to_raw(der)),
         "header": header,
+    }
+
+
+def assemble_keyless_signature(
+    protected: str,
+    der_signature: bytes,
+    leaf_cert_der: bytes,
+    rekor_log_index: int,
+) -> dict[str, Any]:
+    """Assemble an ``AgentCardSignature`` from Sigstore keyless outputs.
+
+    The Fulcio leaf certificate goes in ``x5c``; the Rekor inclusion index goes in
+    the custom ``rekorLogIndex`` header field. The signature is the same ES256 DER
+    value Sigstore produced over the JWS signing input, re-encoded as JOSE R||S.
+
+    Args:
+        protected: The base64url ES256 protected header (see ``protected_b64``).
+        der_signature: The DER-encoded ECDSA signature from Sigstore.
+        leaf_cert_der: The Fulcio leaf certificate in DER form.
+        rekor_log_index: The Rekor transparency-log index.
+
+    Returns:
+        A spec-native ``AgentCardSignature`` dict.
+    """
+    x5c = [base64.b64encode(leaf_cert_der).decode("ascii")]
+    return {
+        "protected": protected,
+        "signature": _b64url(_der_to_raw(der_signature)),
+        "header": {"x5c": x5c, "rekorLogIndex": rekor_log_index},
     }
 
 
