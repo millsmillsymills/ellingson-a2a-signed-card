@@ -27,6 +27,7 @@ from ellingson_card.errors import (
     MissingSignature,
 )
 from ellingson_card.keys import identity_from_cert, x5c_to_cert
+from ellingson_card.rekor import rekor_entry_exists
 from ellingson_card.signer import signing_input
 
 _COORD_BYTES = 32
@@ -35,8 +36,8 @@ RekorChecker = Callable[[int], bool]
 
 
 def default_rekor_checker(log_index: int) -> bool:
-    """Confirm a Rekor entry exists for ``log_index`` (wired up in the Rekor task)."""
-    raise NotImplementedError("real Rekor lookup is provided by the rekor module")
+    """Confirm a Rekor entry exists for ``log_index`` against the public instance."""
+    return rekor_entry_exists(log_index)
 
 
 @dataclass(frozen=True)
