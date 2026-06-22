@@ -39,7 +39,9 @@ def fetch_entry_body(
 
     Returns:
         The decoded entry body (a ``hashedrekord`` dict) if present, or ``None``
-        if no entry exists at the index (HTTP 404) or the response is malformed.
+        if no entry exists at the index (HTTP 404), the response is malformed, or
+        the returned entry's own ``logIndex`` does not match the requested index
+        (so the authenticated index, not just the binding, points at this entry).
 
     Raises:
         urllib.error.URLError: On network failure (the verifier then fails closed
@@ -59,14 +61,16 @@ def fetch_entry_body(
         payload = json.loads(raw)
     except ValueError:
         return None
-    return _decode_body(payload)
+    return _decode_body(payload, int(log_index))
 
 
-def _decode_body(payload: Any) -> dict[str, Any] | None:
+def _decode_body(payload: Any, log_index: int) -> dict[str, Any] | None:
     if not isinstance(payload, dict) or not payload:
         return None
     entry = next(iter(payload.values()))
     if not isinstance(entry, dict):
+        return None
+    if entry.get("logIndex") != log_index:
         return None
     raw_body = entry.get("body")
     if not isinstance(raw_body, str):
