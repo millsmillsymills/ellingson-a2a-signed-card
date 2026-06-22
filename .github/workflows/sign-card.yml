@@ -1,0 +1,40 @@
+name: Sign Agent Card
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # Sigstore keyless: exchange OIDC for a Fulcio cert
+      contents: read
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          python-version: "3.13"
+          enable-cache: false
+      - run: uv sync --locked
+      - name: Keyless-sign the agent card
+        run: |
+          uv run ellingson-card sign \
+            --in cards/ellingson-agent-card.json \
+            --out signed-card.json \
+            --keyless
+      - name: Verify the signed card (identity-pinned, Rekor required)
+        run: |
+          uv run ellingson-card verify \
+            --in signed-card.json \
+            --identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/sign-card.yml@${GITHUB_REF}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-agent-card
+          path: signed-card.json

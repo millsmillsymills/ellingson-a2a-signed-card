@@ -22,10 +22,18 @@ from ellingson_card.verifier import verify_card
 
 def _cmd_sign(args: argparse.Namespace) -> int:
     card = load_card(args.in_path)
-    key, cert = generate_signing_material(args.identity)
-    signed = attach_signature(card, sign_card(card, key, cert))
+    if args.keyless:
+        from ellingson_card.keyless import sign_card_keyless
+
+        signature = sign_card_keyless(card, staging=args.staging)
+        detail = "keyless (Sigstore)"
+    else:
+        key, cert = generate_signing_material(args.identity)
+        signature = sign_card(card, key, cert)
+        detail = f"ephemeral key, identity: {args.identity}"
+    signed = attach_signature(card, signature)
     args.out_path.write_text(json.dumps(signed, indent=2))
-    print(f"signed card written to {args.out_path} (identity: {args.identity})")
+    print(f"signed card written to {args.out_path} ({detail})")
     return 0
 
 
@@ -64,6 +72,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sign.add_argument("--in", dest="in_path", type=Path, required=True)
     sign.add_argument("--out", dest="out_path", type=Path, required=True)
     sign.add_argument("--identity", default="https://ellingson-security.example/local-dev")
+    sign.add_argument("--keyless", action="store_true", help="sign with Sigstore keyless (CI)")
+    sign.add_argument("--staging", action="store_true", help="use the Sigstore staging instance")
     sign.set_defaults(func=_cmd_sign)
 
     verify = sub.add_parser("verify", help="verify a signed agent card")
