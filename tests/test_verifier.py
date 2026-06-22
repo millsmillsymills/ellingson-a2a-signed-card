@@ -221,6 +221,18 @@ def test_self_signed_rejected_when_trust_root_configured():
             expected_identity=IDENTITY,
             require_rekor=False,
             trust_root=TrustRoot((root,)),
+            expected_oidc_issuer=OIDC_ISSUER,
+        )
+
+
+def test_trust_root_without_expected_oidc_issuer_is_rejected():
+    signed, trust_root = _ca_signed()
+    with pytest.raises(ValueError, match="expected_oidc_issuer"):
+        verify_card(
+            signed,
+            expected_identity=IDENTITY,
+            require_rekor=False,
+            trust_root=trust_root,
         )
 
 
