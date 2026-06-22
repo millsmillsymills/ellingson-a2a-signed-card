@@ -1,0 +1,52 @@
+{
+  "name": "Ellingson Security Research Triage Agent",
+  "description": "Triages inbound security-research disclosures for Ellingson Security Research and routes them to the correct human analyst. Card text is untrusted input; routing never feeds freeform card text into a selection prompt.",
+  "version": "1.0.0",
+  "documentationUrl": "https://a2a.ellingson-security.example/docs",
+  "iconUrl": "https://a2a.ellingson-security.example/icon.png",
+  "provider": {
+    "organization": "Ellingson Security Research",
+    "url": "https://ellingson-security.example"
+  },
+  "supportedInterfaces": [
+    {
+      "url": "https://a2a.ellingson-security.example/jsonrpc",
+      "protocolBinding": "JSONRPC",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": true
+  },
+  "securitySchemes": {
+    "ellingson-oauth": {
+      "type": "oauth2",
+      "description": "OAuth2 Authorization Code with PKCE required.",
+      "flows": {
+        "authorizationCode": {
+          "authorizationUrl": "https://auth.ellingson-security.example/authorize",
+          "tokenUrl": "https://auth.ellingson-security.example/token",
+          "pkceRequired": true,
+          "scopes": {
+            "triage:submit": "Submit a disclosure for triage."
+          }
+        }
+      }
+    }
+  },
+  "securityRequirements": [
+    { "ellingson-oauth": ["triage:submit"] }
+  ],
+  "defaultInputModes": ["text/plain", "application/json"],
+  "defaultOutputModes": ["application/json"],
+  "skills": [
+    {
+      "id": "triage-disclosure",
+      "name": "Triage a security disclosure",
+      "description": "Classify severity and route a disclosure to the owning analyst.",
+      "tags": ["security", "triage"],
+      "examples": ["Submit a CVE-style report for triage."]
+    }
+  ]
+}
