@@ -21,6 +21,7 @@ from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.x509.oid import ExtendedKeyUsageOID
 
 from ellingson_card.errors import UntrustedCertificate
 
@@ -53,16 +54,21 @@ def verify_chain(
 
     Walks from the leaf upward, at each hop checking the certificate's validity
     window contains ``at_time`` and that the issuer cryptographically signed it.
-    Non-anchor issuers must assert ``BasicConstraints(ca=True)``. Terminates
+    The leaf must carry the code-signing extended key usage. Non-anchor issuers
+    must assert ``BasicConstraints(ca=True)`` and honor their ``pathLenConstraint``
+    against the number of intermediate CAs already below them. Terminates
     successfully when the current certificate is itself a trusted anchor.
 
     Raises:
         UntrustedCertificate: If no path to a trusted anchor exists, a hop is
-            expired, an issuer is not a CA, or the chain exceeds the depth limit.
+            expired, the leaf lacks code-signing EKU, an issuer is not a CA, a
+            ``pathLenConstraint`` is exceeded, or the chain exceeds the depth limit.
     """
     anchor_fingerprints = {_fingerprint(c) for c in trust_root.anchors}
     pool = [*intermediates, *trust_root.anchors]
+    _require_code_signing_eku(leaf)
     cert = leaf
+    intermediate_ca_count = 0
     for _ in range(_MAX_CHAIN_DEPTH):
         _check_validity(cert, at_time)
         if _fingerprint(cert) in anchor_fingerprints:
@@ -71,7 +77,8 @@ def verify_chain(
         if issuer is None:
             raise UntrustedCertificate(f"no trusted issuer for {cert.subject.rfc4514_string()!r}")
         if _fingerprint(issuer) not in anchor_fingerprints:
-            _require_ca(issuer)
+            _require_ca(issuer, intermediate_ca_count)
+            intermediate_ca_count += 1
         cert = issuer
     raise UntrustedCertificate("certificate chain exceeds maximum depth")
 
@@ -123,7 +130,20 @@ def _signed_by(cert: x509.Certificate, issuer: x509.Certificate) -> bool:
     return True
 
 
-def _require_ca(cert: x509.Certificate) -> None:
+def _require_code_signing_eku(cert: x509.Certificate) -> None:
+    try:
+        eku = cert.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
+    except x509.ExtensionNotFound as exc:
+        raise UntrustedCertificate(
+            f"leaf {cert.subject.rfc4514_string()!r} has no extended key usage"
+        ) from exc
+    if ExtendedKeyUsageOID.CODE_SIGNING not in eku:
+        raise UntrustedCertificate(
+            f"leaf {cert.subject.rfc4514_string()!r} is not a code-signing certificate"
+        )
+
+
+def _require_ca(cert: x509.Certificate, intermediates_below: int) -> None:
     try:
         constraints = cert.extensions.get_extension_for_class(x509.BasicConstraints).value
     except x509.ExtensionNotFound as exc:
@@ -132,3 +152,8 @@ def _require_ca(cert: x509.Certificate) -> None:
         ) from exc
     if not constraints.ca:
         raise UntrustedCertificate(f"issuer {cert.subject.rfc4514_string()!r} is not a CA")
+    if constraints.path_length is not None and intermediates_below > constraints.path_length:
+        raise UntrustedCertificate(
+            f"issuer {cert.subject.rfc4514_string()!r} pathLenConstraint "
+            f"{constraints.path_length} exceeded"
+        )

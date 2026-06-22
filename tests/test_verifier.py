@@ -5,7 +5,7 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.x509.oid import NameOID
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 import ellingson_card.verifier as verifier_mod
 from ellingson_card.errors import (
@@ -67,6 +67,7 @@ def _ca_signed(identity=IDENTITY, oidc_issuer=OIDC_ISSUER):
         .add_extension(
             x509.SubjectAlternativeName([x509.UniformResourceIdentifier(identity)]), critical=False
         )
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]), critical=False)
     )
     if oidc_issuer is not None:
         builder = builder.add_extension(

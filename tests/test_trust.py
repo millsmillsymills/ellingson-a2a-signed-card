@@ -4,7 +4,7 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.x509.oid import NameOID
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from ellingson_card.errors import UntrustedCertificate
 from ellingson_card.keys import cert_to_x5c, x5c_to_cert
@@ -43,7 +43,15 @@ def _ca(cn, *, issuer_cert=None, issuer_key=None, path_length=None):
     return key, cert
 
 
-def _leaf(issuer_cert, issuer_key, *, identity=IDENTITY, issuer_oidc=ISSUER, not_after=None):
+def _leaf(
+    issuer_cert,
+    issuer_key,
+    *,
+    identity=IDENTITY,
+    issuer_oidc=ISSUER,
+    code_signing=True,
+    not_after=None,
+):
     key = ec.generate_private_key(ec.SECP256R1())
     builder = (
         x509.CertificateBuilder()
@@ -58,6 +66,10 @@ def _leaf(issuer_cert, issuer_key, *, identity=IDENTITY, issuer_oidc=ISSUER, not
             x509.SubjectAlternativeName([x509.UniformResourceIdentifier(identity)]), critical=False
         )
     )
+    if code_signing:
+        builder = builder.add_extension(
+            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]), critical=False
+        )
     if issuer_oidc is not None:
         builder = builder.add_extension(
             x509.UnrecognizedExtension(FULCIO_OIDC_ISSUER_OID, issuer_oidc.encode()), critical=False
@@ -126,6 +138,30 @@ def test_verify_chain_rejects_non_ca_intermediate():
     _, leaf = _leaf(forged, forged_key)
     with pytest.raises(UntrustedCertificate):
         verify_chain(leaf, [forged], TrustRoot((root,)), at_time=NOW)
+
+
+def test_verify_chain_rejects_leaf_without_code_signing_eku():
+    root_key, root = _ca("root")
+    _, leaf = _leaf(root, root_key, code_signing=False)
+    with pytest.raises(UntrustedCertificate):
+        verify_chain(leaf, [], TrustRoot((root,)), at_time=NOW)
+
+
+def test_verify_chain_rejects_pathlen_zero_intermediate_signing_intermediate():
+    root_key, root = _ca("root")
+    zero_key, zero = _ca("pathlen-zero", issuer_cert=root, issuer_key=root_key, path_length=0)
+    sub_key, sub = _ca("sub-intermediate", issuer_cert=zero, issuer_key=zero_key)
+    _, leaf = _leaf(sub, sub_key)
+    with pytest.raises(UntrustedCertificate):
+        verify_chain(leaf, [sub, zero], TrustRoot((root,)), at_time=NOW)
+
+
+def test_verify_chain_accepts_pathlen_one_intermediate():
+    root_key, root = _ca("root")
+    one_key, one = _ca("pathlen-one", issuer_cert=root, issuer_key=root_key, path_length=1)
+    sub_key, sub = _ca("sub-intermediate", issuer_cert=one, issuer_key=one_key, path_length=0)
+    _, leaf = _leaf(sub, sub_key)
+    verify_chain(leaf, [sub, one], TrustRoot((root,)), at_time=NOW)
 
 
 def test_oidc_issuer_reads_fulcio_extension():
