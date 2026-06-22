@@ -22,6 +22,11 @@ class IdentityMismatch(VerificationError):
     """The signing certificate identity does not match the pinned identity."""
 
 
+class UntrustedCertificate(VerificationError):
+    """The signing certificate does not chain to a trusted root, or its Fulcio
+    OIDC-issuer extension does not match the expected issuer."""
+
+
 class MissingRekorEntry(VerificationError):
     """No Rekor transparency-log entry is present or it could not be confirmed."""
 
