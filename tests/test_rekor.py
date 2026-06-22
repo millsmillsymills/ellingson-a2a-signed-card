@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 import urllib.error
 from email.message import Message
 
@@ -201,3 +202,51 @@ def test_entry_binds_false_on_missing_apiversion():
     body = _body()
     del body["apiVersion"]
     assert not rekor.entry_binds(body, artifact_sha256_hex=ARTIFACT_HEX, signature_der=SIG_DER)
+
+
+def _records_at(caplog, level):
+    return [r for r in caplog.records if r.levelno == level and r.name == rekor.__name__]
+
+
+def test_entry_binds_logs_warning_on_hash_mismatch(caplog):
+    caplog.set_level(logging.DEBUG, logger=rekor.__name__)
+    rekor.entry_binds(
+        _body(artifact_hex="b" * 64), artifact_sha256_hex=ARTIFACT_HEX, signature_der=SIG_DER
+    )
+    assert _records_at(caplog, logging.WARNING)
+
+
+def test_entry_binds_logs_warning_on_signature_mismatch(caplog):
+    caplog.set_level(logging.DEBUG, logger=rekor.__name__)
+    rekor.entry_binds(
+        _body(sig_der=b"\x30\x06\x02\x01\x09\x02\x01\x09"),
+        artifact_sha256_hex=ARTIFACT_HEX,
+        signature_der=SIG_DER,
+    )
+    assert _records_at(caplog, logging.WARNING)
+
+
+def test_entry_binds_logs_debug_on_structural_surprise(caplog):
+    caplog.set_level(logging.DEBUG, logger=rekor.__name__)
+    rekor.entry_binds(_body(kind="dsse"), artifact_sha256_hex=ARTIFACT_HEX, signature_der=SIG_DER)
+    assert _records_at(caplog, logging.DEBUG)
+    assert not _records_at(caplog, logging.WARNING)
+
+
+def test_fetch_entry_body_logs_debug_on_404(caplog, monkeypatch):
+    caplog.set_level(logging.DEBUG, logger=rekor.__name__)
+    _patch_urlopen(monkeypatch, exc=urllib.error.HTTPError("u", 404, "not found", Message(), None))
+    rekor.fetch_entry_body(42)
+    assert _records_at(caplog, logging.DEBUG)
+    assert not _records_at(caplog, logging.WARNING)
+
+
+def test_fetch_entry_body_logs_warning_on_non_200(caplog, monkeypatch):
+    caplog.set_level(logging.DEBUG, logger=rekor.__name__)
+
+    class _ErrResp(_Resp):
+        status = 500
+
+    monkeypatch.setattr(rekor.urllib.request, "urlopen", lambda url, timeout: _ErrResp({}))
+    rekor.fetch_entry_body(42)
+    assert _records_at(caplog, logging.WARNING)
