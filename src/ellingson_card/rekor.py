@@ -20,6 +20,9 @@ from typing import Any
 
 DEFAULT_REKOR_URL = "https://rekor.sigstore.dev"
 
+SUPPORTED_HASHEDREKORD_APIVERSION = "0.0.1"
+EXPECTED_HASH_ALGORITHM = "sha256"
+
 
 def fetch_entry_body(
     log_index: int,
@@ -83,15 +86,24 @@ def entry_binds(
 ) -> bool:
     """Return whether a Rekor entry body binds to this artifact and signature.
 
-    The entry must be a ``hashedrekord`` whose logged artifact digest equals
-    ``artifact_sha256_hex`` and whose logged signature equals ``signature_der``.
-    A mismatch (or any structural surprise) returns ``False`` so the verifier
-    fails closed.
+    The entry must be a ``hashedrekord`` at the supported ``apiVersion`` whose
+    logged artifact digest (pinned to ``sha256``) equals ``artifact_sha256_hex``
+    and whose logged signature equals ``signature_der``. A mismatch, an
+    unsupported schema version, or any structural surprise returns ``False`` so
+    the verifier fails closed.
+
+    The ``apiVersion`` is pinned because the ``hashedrekord`` spec field layout
+    differs across versions (0.0.1 vs 0.0.2); reading a newer schema with the
+    0.0.1 field paths would silently misbind, so an unknown version is rejected.
     """
     if body.get("kind") != "hashedrekord":
         return False
+    if body.get("apiVersion") != SUPPORTED_HASHEDREKORD_APIVERSION:
+        return False
     spec = body.get("spec")
     if not isinstance(spec, dict):
+        return False
+    if _dig(spec, "data", "hash", "algorithm") != EXPECTED_HASH_ALGORITHM:
         return False
     logged_hash = _dig(spec, "data", "hash", "value")
     if logged_hash != artifact_sha256_hex:
