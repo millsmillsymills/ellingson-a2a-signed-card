@@ -28,9 +28,12 @@ def _body(
     }
 
 
-def _rekor_payload(body):
+def _rekor_payload(body, log_index=42):
     return {
-        "uuid123": {"logIndex": 42, "body": base64.b64encode(json.dumps(body).encode()).decode()}
+        "uuid123": {
+            "logIndex": log_index,
+            "body": base64.b64encode(json.dumps(body).encode()).decode(),
+        }
     }
 
 
@@ -64,6 +67,18 @@ def test_fetch_entry_body_decodes(monkeypatch):
     body = rekor.fetch_entry_body(42)
     assert body is not None
     assert body["kind"] == "hashedrekord"
+
+
+def test_fetch_entry_body_none_on_index_mismatch(monkeypatch):
+    _patch_urlopen(monkeypatch, _rekor_payload(_body(), log_index=99))
+    assert rekor.fetch_entry_body(42) is None
+
+
+def test_fetch_entry_body_none_on_missing_index(monkeypatch):
+    payload = _rekor_payload(_body())
+    del payload["uuid123"]["logIndex"]
+    _patch_urlopen(monkeypatch, payload)
+    assert rekor.fetch_entry_body(42) is None
 
 
 def test_fetch_entry_body_none_on_404(monkeypatch):
