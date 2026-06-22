@@ -87,8 +87,9 @@ def test_rekor_checker_receives_binding_material():
     assert len(captured["hex"]) == 64
     matching_body = {
         "kind": "hashedrekord",
+        "apiVersion": "0.0.1",
         "spec": {
-            "data": {"hash": {"value": captured["hex"]}},
+            "data": {"hash": {"algorithm": "sha256", "value": captured["hex"]}},
             "signature": {"content": base64.b64encode(captured["der"]).decode()},
         },
     }

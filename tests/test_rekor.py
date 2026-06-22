@@ -11,11 +11,18 @@ ARTIFACT_HEX = "a" * 64
 SIG_DER = b"\x30\x44\x02\x20" + b"\x01" * 32 + b"\x02\x20" + b"\x02" * 32
 
 
-def _body(kind="hashedrekord", artifact_hex=ARTIFACT_HEX, sig_der=SIG_DER):
+def _body(
+    kind="hashedrekord",
+    artifact_hex=ARTIFACT_HEX,
+    sig_der=SIG_DER,
+    api_version="0.0.1",
+    algorithm="sha256",
+):
     return {
         "kind": kind,
+        "apiVersion": api_version,
         "spec": {
-            "data": {"hash": {"algorithm": "sha256", "value": artifact_hex}},
+            "data": {"hash": {"algorithm": algorithm, "value": artifact_hex}},
             "signature": {"content": base64.b64encode(sig_der).decode()},
         },
     }
@@ -155,5 +162,27 @@ def test_entry_binds_false_on_malformed_signature_base64():
 
 
 def test_entry_binds_false_on_non_dict_nested_field():
-    body = {"kind": "hashedrekord", "spec": {"data": "notdict"}}
+    body = {"kind": "hashedrekord", "apiVersion": "0.0.1", "spec": {"data": "notdict"}}
+    assert not rekor.entry_binds(body, artifact_sha256_hex=ARTIFACT_HEX, signature_der=SIG_DER)
+
+
+def test_entry_binds_false_on_non_sha256_algorithm():
+    body = _body(algorithm="sha512")
+    assert not rekor.entry_binds(body, artifact_sha256_hex=ARTIFACT_HEX, signature_der=SIG_DER)
+
+
+def test_entry_binds_false_on_missing_algorithm():
+    body = _body()
+    del body["spec"]["data"]["hash"]["algorithm"]
+    assert not rekor.entry_binds(body, artifact_sha256_hex=ARTIFACT_HEX, signature_der=SIG_DER)
+
+
+def test_entry_binds_false_on_unsupported_apiversion():
+    body = _body(api_version="0.0.2")
+    assert not rekor.entry_binds(body, artifact_sha256_hex=ARTIFACT_HEX, signature_der=SIG_DER)
+
+
+def test_entry_binds_false_on_missing_apiversion():
+    body = _body()
+    del body["apiVersion"]
     assert not rekor.entry_binds(body, artifact_sha256_hex=ARTIFACT_HEX, signature_der=SIG_DER)
