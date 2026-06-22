@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -34,6 +35,8 @@ from ellingson_card.rekor import entry_binds, fetch_entry_body
 from ellingson_card.signer import signing_input
 from ellingson_card.trust import TrustRoot, oidc_issuer, verify_chain
 
+logger = logging.getLogger(__name__)
+
 _COORD_BYTES = 32
 
 RekorChecker = Callable[[int, str, bytes], bool]
@@ -43,8 +46,12 @@ def default_rekor_checker(log_index: int, artifact_sha256_hex: str, signature_de
     """Confirm a Rekor entry at ``log_index`` binds to this artifact and signature."""
     body = fetch_entry_body(log_index)
     if body is None:
+        logger.debug("no usable Rekor entry at logIndex=%s (absent or unreachable)", log_index)
         return False
-    return entry_binds(body, artifact_sha256_hex=artifact_sha256_hex, signature_der=signature_der)
+    if not entry_binds(body, artifact_sha256_hex=artifact_sha256_hex, signature_der=signature_der):
+        logger.warning("Rekor entry at logIndex=%s does not bind to this signature", log_index)
+        return False
+    return True
 
 
 @dataclass(frozen=True)
