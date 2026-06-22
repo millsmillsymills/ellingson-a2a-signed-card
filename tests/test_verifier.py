@@ -113,6 +113,41 @@ def test_default_checker_rejects_entry_bound_to_other_signature(monkeypatch):
         verify_card(signed, expected_identity=IDENTITY)
 
 
+def test_default_checker_rejects_when_entry_absent(monkeypatch):
+    signed = _signed(rekor_log_index=7)
+    monkeypatch.setattr(verifier_mod, "fetch_entry_body", lambda *_a, **_k: None)
+    with pytest.raises(MissingRekorEntry):
+        verify_card(signed, expected_identity=IDENTITY)
+
+
+def test_non_int_rekor_index_fails_closed():
+    signed = _signed(rekor_log_index=7)
+    signed["signatures"][0]["header"]["rekorLogIndex"] = "7; DROP"
+    with pytest.raises(MissingRekorEntry):
+        verify_card(signed, expected_identity=IDENTITY, rekor_checker=lambda *_args: True)
+
+
+def test_bool_rekor_index_fails_closed():
+    signed = _signed(rekor_log_index=7)
+    signed["signatures"][0]["header"]["rekorLogIndex"] = True
+    with pytest.raises(MissingRekorEntry):
+        verify_card(signed, expected_identity=IDENTITY, rekor_checker=lambda *_args: True)
+
+
+def test_malformed_cert_fails_closed():
+    signed = _signed(rekor_log_index=7)
+    signed["signatures"][0]["header"]["x5c"] = []
+    with pytest.raises(BadSignature):
+        verify_card(signed, expected_identity=IDENTITY)
+
+
+def test_malformed_signature_field_fails_closed():
+    signed = _signed(rekor_log_index=7)
+    signed["signatures"][0]["signature"] = "!!!not-b64url!!!"
+    with pytest.raises(BadSignature):
+        verify_card(signed, expected_identity=IDENTITY)
+
+
 def test_expired_card_fails_closed():
     signed = _signed(rekor_log_index=7)
     with pytest.raises(CardExpired):

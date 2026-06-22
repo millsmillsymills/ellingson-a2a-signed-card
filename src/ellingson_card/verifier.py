@@ -58,6 +58,10 @@ def _b64url_decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
+def _valid_log_index(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 def _load_cert(signature: dict[str, Any]) -> x509.Certificate:
     try:
         return x5c_to_cert(signature["header"]["x5c"][0])
@@ -137,7 +141,7 @@ def verify_card(
     rekor_log_index = signature["header"].get("rekorLogIndex")
     if require_rekor:
         artifact_hex = hashlib.sha256(message).hexdigest()
-        if rekor_log_index is None or not rekor_checker(
+        if not _valid_log_index(rekor_log_index) or not rekor_checker(
             rekor_log_index, artifact_hex, signature_der
         ):
             raise MissingRekorEntry("no Rekor transparency-log entry bound to this signature")

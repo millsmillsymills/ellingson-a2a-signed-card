@@ -70,6 +70,51 @@ def test_fetch_entry_body_network_error_propagates(monkeypatch):
         rekor.fetch_entry_body(42)
 
 
+def test_fetch_entry_body_none_on_non_200(monkeypatch):
+    class _ErrResp(_Resp):
+        status = 500
+
+    def fake_urlopen(url, timeout):  # noqa: ARG001
+        return _ErrResp({})
+
+    monkeypatch.setattr(rekor.urllib.request, "urlopen", fake_urlopen)
+    assert rekor.fetch_entry_body(42) is None
+
+
+def test_fetch_entry_body_propagates_non_404_http_error(monkeypatch):
+    _patch_urlopen(monkeypatch, exc=urllib.error.HTTPError("u", 500, "boom", Message(), None))
+    with pytest.raises(urllib.error.HTTPError):
+        rekor.fetch_entry_body(42)
+
+
+def test_fetch_entry_body_none_on_malformed_json(monkeypatch):
+    class _BadResp(_Resp):
+        def read(self):
+            return b"this is not json"
+
+    def fake_urlopen(url, timeout):  # noqa: ARG001
+        return _BadResp(None)
+
+    monkeypatch.setattr(rekor.urllib.request, "urlopen", fake_urlopen)
+    assert rekor.fetch_entry_body(42) is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"uuid": "not-a-dict"},
+        {"uuid": {}},
+        {"uuid": {"body": 123}},
+        {"uuid": {"body": "!!!not-base64!!!"}},
+        {"uuid": {"body": base64.b64encode(json.dumps([1, 2]).encode()).decode()}},
+    ],
+)
+def test_fetch_entry_body_none_on_malformed_payload(monkeypatch, payload):
+    _patch_urlopen(monkeypatch, payload)
+    assert rekor.fetch_entry_body(42) is None
+
+
 def test_entry_binds_true_on_match():
     assert rekor.entry_binds(_body(), artifact_sha256_hex=ARTIFACT_HEX, signature_der=SIG_DER)
 
@@ -95,3 +140,20 @@ def test_entry_binds_false_on_malformed_spec():
         artifact_sha256_hex=ARTIFACT_HEX,
         signature_der=SIG_DER,
     )
+
+
+def test_entry_binds_false_on_non_str_signature_content():
+    body = _body()
+    body["spec"]["signature"]["content"] = 123
+    assert not rekor.entry_binds(body, artifact_sha256_hex=ARTIFACT_HEX, signature_der=SIG_DER)
+
+
+def test_entry_binds_false_on_malformed_signature_base64():
+    body = _body()
+    body["spec"]["signature"]["content"] = "!!!not-base64!!!"
+    assert not rekor.entry_binds(body, artifact_sha256_hex=ARTIFACT_HEX, signature_der=SIG_DER)
+
+
+def test_entry_binds_false_on_non_dict_nested_field():
+    body = {"kind": "hashedrekord", "spec": {"data": "notdict"}}
+    assert not rekor.entry_binds(body, artifact_sha256_hex=ARTIFACT_HEX, signature_der=SIG_DER)

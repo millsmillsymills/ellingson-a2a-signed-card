@@ -47,11 +47,15 @@ def fetch_entry_body(
         with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310
             if response.status != 200:
                 return None
-            payload = json.loads(response.read())
+            raw = response.read()
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return None
         raise
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None
     return _decode_body(payload)
 
 
