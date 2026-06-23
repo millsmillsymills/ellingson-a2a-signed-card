@@ -74,6 +74,7 @@ def _leaf(
     issuer_oidc=ISSUER,
     code_signing=True,
     key_usage=True,
+    key_usage_critical=True,
     digital_signature=True,
     issuer_oidc_v2=None,
     issuer_oidc_v2_raw=None,
@@ -98,7 +99,7 @@ def _leaf(
             x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]), critical=False
         )
     if key_usage:
-        builder = builder.add_extension(_key_usage(digital_signature), critical=True)
+        builder = builder.add_extension(_key_usage(digital_signature), critical=key_usage_critical)
     if issuer_oidc is not None:
         builder = builder.add_extension(
             x509.UnrecognizedExtension(FULCIO_OIDC_ISSUER_OID, issuer_oidc.encode()), critical=False
@@ -195,6 +196,13 @@ def test_verify_chain_rejects_leaf_without_digital_signature_usage():
     root_key, root = _ca("root")
     _, leaf = _leaf(root, root_key, digital_signature=False)
     with pytest.raises(UntrustedCertificate):
+        verify_chain(leaf, [], TrustRoot((root,)), at_time=NOW)
+
+
+def test_verify_chain_rejects_non_critical_key_usage():
+    root_key, root = _ca("root")
+    _, leaf = _leaf(root, root_key, key_usage_critical=False)
+    with pytest.raises(UntrustedCertificate, match="key usage"):
         verify_chain(leaf, [], TrustRoot((root,)), at_time=NOW)
 
 
