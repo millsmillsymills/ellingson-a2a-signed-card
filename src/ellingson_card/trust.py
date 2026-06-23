@@ -198,11 +198,16 @@ def _require_code_signing_eku(cert: x509.Certificate) -> None:
 
 def _require_digital_signature(cert: x509.Certificate) -> None:
     try:
-        key_usage = cert.extensions.get_extension_for_class(x509.KeyUsage).value
+        extension = cert.extensions.get_extension_for_class(x509.KeyUsage)
     except x509.ExtensionNotFound as exc:
         raise UntrustedCertificate(
             f"leaf {cert.subject.rfc4514_string()!r} has no key usage"
         ) from exc
+    if not extension.critical:
+        raise UntrustedCertificate(
+            f"leaf {cert.subject.rfc4514_string()!r} key usage is not marked critical"
+        )
+    key_usage = extension.value
     if not key_usage.digital_signature:
         raise UntrustedCertificate(
             f"leaf {cert.subject.rfc4514_string()!r} key usage does not permit digital signatures"
