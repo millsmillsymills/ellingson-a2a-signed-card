@@ -9,6 +9,7 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # live Sigstore staging calls can hang; cap well under the 6h default
     permissions:
       id-token: write # Sigstore keyless: exchange OIDC for a Fulcio cert
       contents: read
@@ -27,7 +28,7 @@ jobs:
             --in cards/ellingson-agent-card.json \
             --out signed-card.json \
             --keyless --staging
-      - name: Verify against staging (identity-pinned, Rekor required)
+      - name: Verify against staging (SAN match + Rekor required, non-anchored)
         run: |
           uv run ellingson-card verify \
             --in signed-card.json \

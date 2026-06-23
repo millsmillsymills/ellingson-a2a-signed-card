@@ -15,11 +15,11 @@ from pathlib import Path
 from ellingson_card.card import CardError, load_card, read_card
 from ellingson_card.errors import VerificationError
 from ellingson_card.keys import generate_signing_material
-from ellingson_card.rekor import STAGING_REKOR_URL
+from ellingson_card.rekor import DEFAULT_REKOR_URL, STAGING_REKOR_URL
 from ellingson_card.serve import WELL_KNOWN_PATH, make_server
 from ellingson_card.signer import attach_signature, sign_card
 from ellingson_card.trust import TrustRoot
-from ellingson_card.verifier import default_rekor_checker, make_rekor_checker, verify_card
+from ellingson_card.verifier import make_rekor_checker, verify_card
 
 
 def _cmd_sign(args: argparse.Namespace) -> int:
@@ -66,7 +66,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
     max_age = timedelta(seconds=args.max_age) if args.max_age is not None else None
-    rekor_checker = make_rekor_checker(STAGING_REKOR_URL) if args.staging else default_rekor_checker
+    rekor_checker = make_rekor_checker(STAGING_REKOR_URL if args.staging else DEFAULT_REKOR_URL)
     try:
         result = verify_card(
             card,
@@ -114,7 +114,8 @@ def _build_parser() -> argparse.ArgumentParser:
     verify.add_argument(
         "--staging",
         action="store_true",
-        help="check Rekor against the Sigstore staging instance",
+        help="route Rekor inclusion checks to Sigstore staging; "
+        "for staging-signed cards on the non-anchored path (not for use with --trust-root)",
     )
     verify.add_argument(
         "--trust-root",
@@ -144,6 +145,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "verify" and bool(args.trust_root) != bool(args.oidc_issuer):
         parser.error("--trust-root and --oidc-issuer must be given together")
+    if args.command == "verify" and args.staging and args.trust_root:
+        parser.error(
+            "--staging routes only Rekor to staging and does not select a staging "
+            "Fulcio trust anchor; it cannot be combined with --trust-root"
+        )
     return int(args.func(args))
 
 
