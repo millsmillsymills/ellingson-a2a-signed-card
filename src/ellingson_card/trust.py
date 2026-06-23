@@ -140,9 +140,9 @@ def _der_utf8string(data: bytes) -> str | None:
             return None
         start = 2 + num_octets
         length_bytes = data[2:start]
-        if length_bytes[0] == 0 or int.from_bytes(length_bytes, "big") < 0x80:
-            return None
         length = int.from_bytes(length_bytes, "big")
+        if length_bytes[0] == 0 or length < 0x80:
+            return None
     if length == 0 or len(data) != start + length:
         return None
     try:
