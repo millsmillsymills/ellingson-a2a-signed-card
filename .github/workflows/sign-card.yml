@@ -33,7 +33,9 @@ jobs:
         run: |
           uv run ellingson-card verify \
             --in signed-card.json \
-            --identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/sign-card.yml@${GITHUB_REF}"
+            --identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/sign-card.yml@${GITHUB_REF}" \
+            | tee verify-output.txt
+          grep -Eq 'rekor log index: [0-9]+' verify-output.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: signed-agent-card
