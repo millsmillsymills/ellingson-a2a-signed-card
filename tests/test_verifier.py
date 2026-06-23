@@ -22,6 +22,7 @@ from ellingson_card.rekor import entry_binds
 from ellingson_card.signer import attach_signature, sign_card
 from ellingson_card.trust import FULCIO_OIDC_ISSUER_OID, TrustRoot
 from ellingson_card.verifier import verify_card
+from tests.conftest import key_usage
 
 IDENTITY = "https://github.com/ellingson/signed-card/.github/workflows/sign.yml@refs/heads/main"
 OIDC_ISSUER = "https://token.actions.githubusercontent.com"
@@ -69,20 +70,7 @@ def _ca_signed(identity=IDENTITY, oidc_issuer=OIDC_ISSUER):
             x509.SubjectAlternativeName([x509.UniformResourceIdentifier(identity)]), critical=False
         )
         .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]), critical=False)
-        .add_extension(
-            x509.KeyUsage(
-                digital_signature=True,
-                content_commitment=False,
-                key_encipherment=False,
-                data_encipherment=False,
-                key_agreement=False,
-                key_cert_sign=False,
-                crl_sign=False,
-                encipher_only=False,
-                decipher_only=False,
-            ),
-            critical=True,
-        )
+        .add_extension(key_usage(digital_signature=True), critical=True)
     )
     if oidc_issuer is not None:
         builder = builder.add_extension(
@@ -293,7 +281,7 @@ def test_ca_issued_cert_verifies_against_trust_root():
 
 def test_oidc_issuer_absent_rejected():
     signed, trust_root = _ca_signed(oidc_issuer=None)
-    with pytest.raises(UntrustedCertificate):
+    with pytest.raises(UntrustedCertificate, match="OIDC issuer"):
         verify_card(
             signed,
             expected_identity=IDENTITY,
@@ -305,7 +293,7 @@ def test_oidc_issuer_absent_rejected():
 
 def test_oidc_issuer_mismatch_rejected():
     signed, trust_root = _ca_signed(oidc_issuer="https://evil.example")
-    with pytest.raises(UntrustedCertificate):
+    with pytest.raises(UntrustedCertificate, match="OIDC issuer"):
         verify_card(
             signed,
             expected_identity=IDENTITY,
