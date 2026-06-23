@@ -31,7 +31,7 @@ from ellingson_card.errors import (
     UntrustedCertificate,
 )
 from ellingson_card.keys import identity_from_cert, x5c_to_cert
-from ellingson_card.rekor import entry_binds, fetch_entry_body
+from ellingson_card.rekor import DEFAULT_REKOR_URL, entry_binds, fetch_entry_body
 from ellingson_card.signer import signing_input
 from ellingson_card.trust import TrustRoot, oidc_issuer, verify_chain
 
@@ -42,16 +42,31 @@ _COORD_BYTES = 32
 RekorChecker = Callable[[int, str, bytes], bool]
 
 
-def default_rekor_checker(log_index: int, artifact_sha256_hex: str, signature_der: bytes) -> bool:
-    """Confirm a Rekor entry at ``log_index`` binds to this artifact and signature."""
-    body = fetch_entry_body(log_index)
-    if body is None:
-        logger.debug("no usable Rekor entry at logIndex=%s (absent or unreachable)", log_index)
-        return False
-    if not entry_binds(body, artifact_sha256_hex=artifact_sha256_hex, signature_der=signature_der):
-        logger.warning("Rekor entry at logIndex=%s does not bind to this signature", log_index)
-        return False
-    return True
+def make_rekor_checker(base_url: str = DEFAULT_REKOR_URL) -> RekorChecker:
+    """Build a Rekor checker bound to a specific Rekor instance.
+
+    The returned predicate confirms a Rekor entry at a log index binds to the
+    artifact digest and DER signature under verification. ``base_url`` selects
+    the instance: production by default, or the Sigstore staging Rekor for cards
+    signed against staging.
+    """
+
+    def checker(log_index: int, artifact_sha256_hex: str, signature_der: bytes) -> bool:
+        body = fetch_entry_body(log_index, base_url=base_url)
+        if body is None:
+            logger.debug("no usable Rekor entry at logIndex=%s (absent or unreachable)", log_index)
+            return False
+        if not entry_binds(
+            body, artifact_sha256_hex=artifact_sha256_hex, signature_der=signature_der
+        ):
+            logger.warning("Rekor entry at logIndex=%s does not bind to this signature", log_index)
+            return False
+        return True
+
+    return checker
+
+
+default_rekor_checker = make_rekor_checker()
 
 
 @dataclass(frozen=True)

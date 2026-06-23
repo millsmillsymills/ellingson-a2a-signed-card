@@ -70,6 +70,18 @@ def test_fetch_entry_body_decodes(monkeypatch):
     assert body["kind"] == "hashedrekord"
 
 
+def test_fetch_entry_body_targets_base_url(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(url, timeout):  # noqa: ARG001
+        captured["url"] = url
+        return _Resp(_rekor_payload(_body()))
+
+    monkeypatch.setattr(rekor.urllib.request, "urlopen", fake_urlopen)
+    rekor.fetch_entry_body(42, base_url=rekor.STAGING_REKOR_URL)
+    assert captured["url"].startswith(rekor.STAGING_REKOR_URL)
+
+
 def test_fetch_entry_body_none_on_index_mismatch(monkeypatch):
     _patch_urlopen(monkeypatch, _rekor_payload(_body(), log_index=99))
     assert rekor.fetch_entry_body(42) is None

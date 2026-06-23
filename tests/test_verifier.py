@@ -119,6 +119,19 @@ def test_rekor_not_required_passes_without_entry():
     assert verify_card(signed, expected_identity=IDENTITY, require_rekor=False).valid
 
 
+def test_make_rekor_checker_routes_to_base_url(monkeypatch):
+    captured = {}
+
+    def fake_fetch(log_index, *, base_url, timeout=10.0):  # noqa: ARG001
+        captured["base_url"] = base_url
+        return None
+
+    monkeypatch.setattr(verifier_mod, "fetch_entry_body", fake_fetch)
+    checker = verifier_mod.make_rekor_checker("https://rekor.example")
+    assert checker(7, "a" * 64, b"\x30\x06") is False
+    assert captured["base_url"] == "https://rekor.example"
+
+
 def test_rekor_checker_rejection_fails_closed():
     signed = _signed(rekor_log_index=7)
     with pytest.raises(MissingRekorEntry):
