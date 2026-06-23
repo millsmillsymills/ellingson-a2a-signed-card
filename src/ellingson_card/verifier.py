@@ -21,9 +21,11 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+from cryptography.hazmat.primitives.serialization import Encoding
 
 from ellingson_card.errors import (
     BadSignature,
+    BundleVerificationError,
     CardExpired,
     IdentityMismatch,
     MissingRekorEntry,
@@ -38,6 +40,7 @@ from ellingson_card.trust import TrustRoot, oidc_issuer, verify_chain
 logger = logging.getLogger(__name__)
 
 _COORD_BYTES = 32
+_DER = Encoding.DER
 
 RekorChecker = Callable[[int, str, bytes], bool]
 
@@ -151,23 +154,31 @@ def verify_card(
     max_age: timedelta | None = None,
     trust_root: TrustRoot | None = None,
     expected_oidc_issuer: str | None = None,
+    staging: bool = False,
 ) -> VerifyResult:
     """Verify a signed Agent Card, failing closed with a distinct error per control.
+
+    A card carrying a ``sigstoreBundle`` header (a keyless Sigstore signature) is
+    verified through Sigstore's offline bundle verifier: the Rekor inclusion proof
+    travels in the bundle, so transparency-log inclusion is confirmed without a
+    log-index REST lookup. All other cards take the hermetic, self-signed-friendly
+    path with the supplied ``rekor_checker``.
 
     Args:
         card_json: The served, signed card as a dict.
         expected_identity: The certificate URI SAN identity to pin.
-        require_rekor: If true, a Rekor entry bound to this signature is mandatory.
+        require_rekor: If true, a Rekor entry bound to this signature is mandatory
+            (non-bundle path only; bundle cards always verify their inclusion proof).
         rekor_checker: Predicate confirming a Rekor entry at a log index binds to
-            the artifact digest and DER signature being verified.
+            the artifact digest and DER signature being verified (non-bundle path).
         max_age: If set, reject signatures whose cert is older than this.
         trust_root: If set, cryptographically anchor trust by chaining the leaf
             to a trusted Fulcio root; a self-signed cert is then rejected. When
             absent, the hermetic self-signed-friendly path is kept unchanged.
         expected_oidc_issuer: Required whenever ``trust_root`` is set; the Fulcio
-            OIDC-issuer extension must equal this value. Issuer pinning is the
-            central control of the anchored path, so omitting it is rejected
-            rather than silently anchoring the chain alone.
+            OIDC-issuer extension must equal this value. On the bundle path it is
+            optional and, when set, also pins the bundle's OIDC issuer.
+        staging: Verify bundle cards against the Sigstore staging trust root.
 
     Returns:
         A ``VerifyResult`` on success.
@@ -175,7 +186,8 @@ def verify_card(
     Raises:
         ValueError: If ``trust_root`` is set without ``expected_oidc_issuer``.
         MissingSignature, BadSignature, IdentityMismatch, CardExpired,
-        UntrustedCertificate, MissingRekorEntry: On the corresponding failure.
+        UntrustedCertificate, MissingRekorEntry, BundleVerificationError: On the
+        corresponding failure.
     """
     signatures = card_json.get("signatures")
     if not signatures:
@@ -193,6 +205,41 @@ def verify_card(
 
     _check_freshness(cert, max_age)
 
+    if "sigstoreBundle" in signature["header"]:
+        return _verify_bundle_card(
+            signature,
+            cert,
+            message,
+            identity=identity,
+            expected_oidc_issuer=expected_oidc_issuer,
+            staging=staging,
+        )
+
+    return _verify_local_card(
+        signature,
+        cert,
+        signature_der,
+        message,
+        identity=identity,
+        require_rekor=require_rekor,
+        rekor_checker=rekor_checker,
+        trust_root=trust_root,
+        expected_oidc_issuer=expected_oidc_issuer,
+    )
+
+
+def _verify_local_card(
+    signature: dict[str, Any],
+    cert: x509.Certificate,
+    signature_der: bytes,
+    message: bytes,
+    *,
+    identity: str,
+    require_rekor: bool,
+    rekor_checker: RekorChecker,
+    trust_root: TrustRoot | None,
+    expected_oidc_issuer: str | None,
+) -> VerifyResult:
     if trust_root is not None:
         if expected_oidc_issuer is None:
             raise ValueError(
@@ -209,4 +256,29 @@ def verify_card(
         ):
             raise MissingRekorEntry("no Rekor transparency-log entry bound to this signature")
 
+    return VerifyResult(identity=identity, rekor_log_index=rekor_log_index)
+
+
+def _verify_bundle_card(
+    signature: dict[str, Any],
+    cert: x509.Certificate,
+    message: bytes,
+    *,
+    identity: str,
+    expected_oidc_issuer: str | None,
+    staging: bool,
+) -> VerifyResult:
+    from ellingson_card.keyless_verify import verify_bundle
+
+    bundle_json = signature["header"]["sigstoreBundle"]
+    if not isinstance(bundle_json, str):
+        raise BundleVerificationError("sigstoreBundle header must be a string")
+    rekor_log_index = verify_bundle(
+        message,
+        bundle_json,
+        expected_identity=identity,
+        expected_leaf_der=cert.public_bytes(_DER),
+        staging=staging,
+        expected_issuer=expected_oidc_issuer,
+    )
     return VerifyResult(identity=identity, rekor_log_index=rekor_log_index)

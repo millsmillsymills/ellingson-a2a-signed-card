@@ -36,19 +36,18 @@ def test_attach_signature_sets_signatures_array():
     assert "signatures" not in CARD
 
 
-def test_assemble_keyless_signature_verifies():
+def test_assemble_keyless_signature_carries_bundle():
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec
 
     from ellingson_card.signer import assemble_keyless_signature, protected_b64, signing_input
-    from ellingson_card.verifier import verify_card
 
     key, cert = generate_signing_material(IDENTITY)
     protected = protected_b64()
     der = key.sign(signing_input(CARD, protected), ec.ECDSA(hashes.SHA256()))
     cert_der = cert.public_bytes(serialization.Encoding.DER)
-    sig = assemble_keyless_signature(protected, der, cert_der, rekor_log_index=99)
-    signed = attach_signature(CARD, sig)
-    result = verify_card(signed, expected_identity=IDENTITY, rekor_checker=lambda *_a: True)
-    assert result.valid
-    assert result.rekor_log_index == 99
+    sig = assemble_keyless_signature(protected, der, cert_der, '{"mediaType": "bundle+json"}')
+    assert sig["header"]["sigstoreBundle"] == '{"mediaType": "bundle+json"}'
+    assert "rekorLogIndex" not in sig["header"]
+    assert sig["header"]["x5c"] == [base64.b64encode(cert_der).decode("ascii")]
+    assert len(_b64url_decode(sig["signature"])) == 64

@@ -228,15 +228,25 @@ def test_trust_root_without_oidc_issuer_errors(tmp_path, capsys):
     with pytest.raises(SystemExit) as excinfo:
         main(["verify", "--in", str(card), "--identity", IDENTITY, "--trust-root", str(root)])
     assert excinfo.value.code == 2
-    assert "must be given together" in capsys.readouterr().err
+    assert "--trust-root requires --oidc-issuer" in capsys.readouterr().err
 
 
-def test_oidc_issuer_without_trust_root_errors(tmp_path, capsys):
+def test_oidc_issuer_without_trust_root_is_allowed(tmp_path, capsys):
     card, _ = _write_anchored(tmp_path)
-    with pytest.raises(SystemExit) as excinfo:
-        main(["verify", "--in", str(card), "--identity", IDENTITY, "--oidc-issuer", OIDC_ISSUER])
-    assert excinfo.value.code == 2
-    assert "must be given together" in capsys.readouterr().err
+    rc = main(
+        [
+            "verify",
+            "--in",
+            str(card),
+            "--identity",
+            IDENTITY,
+            "--no-require-rekor",
+            "--oidc-issuer",
+            OIDC_ISSUER,
+        ]
+    )
+    assert rc == 0
+    assert IDENTITY in capsys.readouterr().out
 
 
 def test_verify_missing_trust_root_file_errors_cleanly(tmp_path, capsys):

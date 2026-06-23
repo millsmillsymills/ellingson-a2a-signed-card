@@ -78,19 +78,22 @@ def assemble_keyless_signature(
     protected: str,
     der_signature: bytes,
     leaf_cert_der: bytes,
-    rekor_log_index: int,
+    sigstore_bundle: str,
 ) -> dict[str, Any]:
     """Assemble an ``AgentCardSignature`` from Sigstore keyless outputs.
 
-    The Fulcio leaf certificate goes in ``x5c``; the Rekor inclusion index goes in
-    the custom ``rekorLogIndex`` header field. The signature is the same ES256 DER
-    value Sigstore produced over the JWS signing input, re-encoded as JOSE R||S.
+    The Fulcio leaf certificate goes in ``x5c`` to keep the card a valid A2A JWS;
+    the full Sigstore bundle (cert chain plus the Rekor inclusion proof and signed
+    checkpoint) goes in the custom ``sigstoreBundle`` header field so the verifier
+    can confirm transparency-log inclusion offline. The signature is the same
+    ES256 DER value Sigstore produced over the JWS signing input, re-encoded as
+    JOSE R||S.
 
     Args:
         protected: The base64url ES256 protected header (see ``protected_b64``).
         der_signature: The DER-encoded ECDSA signature from Sigstore.
         leaf_cert_der: The Fulcio leaf certificate in DER form.
-        rekor_log_index: The Rekor transparency-log index.
+        sigstore_bundle: The serialized Sigstore bundle JSON (``Bundle.to_json``).
 
     Returns:
         A spec-native ``AgentCardSignature`` dict.
@@ -99,7 +102,7 @@ def assemble_keyless_signature(
     return {
         "protected": protected,
         "signature": _b64url(_der_to_raw(der_signature)),
-        "header": {"x5c": x5c, "rekorLogIndex": rekor_log_index},
+        "header": {"x5c": x5c, "sigstoreBundle": sigstore_bundle},
     }
 
 

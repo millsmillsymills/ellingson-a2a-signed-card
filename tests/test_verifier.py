@@ -327,3 +327,78 @@ def test_local_demo_path_unchanged_without_trust_root():
     signed = _signed(rekor_log_index=7)
     result = verify_card(signed, expected_identity=IDENTITY, rekor_checker=lambda *_a: True)
     assert result.valid
+
+
+def _bundle_signed(bundle="{}"):
+    key, cert = generate_signing_material(IDENTITY)
+    sig = sign_card(CARD, key, cert)
+    sig["header"]["sigstoreBundle"] = bundle
+    return attach_signature(CARD, sig), cert
+
+
+def test_bundle_card_routes_to_sigstore_verify(monkeypatch):
+    from cryptography.hazmat.primitives.serialization import Encoding
+
+    import ellingson_card.keyless_verify as kv
+
+    signed, cert = _bundle_signed()
+    captured = {}
+
+    def fake_verify_bundle(message, bundle_json, **kwargs):
+        captured.update(message=message, bundle_json=bundle_json, **kwargs)
+        return 4581700
+
+    monkeypatch.setattr(kv, "verify_bundle", fake_verify_bundle)
+    result = verify_card(signed, expected_identity=IDENTITY, staging=True)
+    assert result.rekor_log_index == 4581700
+    assert captured["expected_identity"] == IDENTITY
+    assert captured["staging"] is True
+    assert captured["expected_leaf_der"] == cert.public_bytes(Encoding.DER)
+
+
+def test_bundle_card_does_not_use_rekor_checker(monkeypatch):
+    import ellingson_card.keyless_verify as kv
+
+    signed, _ = _bundle_signed()
+    monkeypatch.setattr(kv, "verify_bundle", lambda *_a, **_k: 1)
+
+    def explode(*_a, **_k):
+        raise AssertionError("rekor_checker must not run on the bundle path")
+
+    assert verify_card(signed, expected_identity=IDENTITY, rekor_checker=explode).valid
+
+
+def test_bundle_card_propagates_bundle_error(monkeypatch):
+    import ellingson_card.keyless_verify as kv
+    from ellingson_card.errors import BundleVerificationError
+
+    signed, _ = _bundle_signed()
+
+    def boom(*_a, **_k):
+        raise BundleVerificationError("inclusion proof does not bind")
+
+    monkeypatch.setattr(kv, "verify_bundle", boom)
+    with pytest.raises(BundleVerificationError):
+        verify_card(signed, expected_identity=IDENTITY)
+
+
+def test_bundle_card_with_non_string_header_fails_closed():
+    from ellingson_card.errors import BundleVerificationError
+
+    signed, _ = _bundle_signed()
+    signed["signatures"][0]["header"]["sigstoreBundle"] = {"not": "a string"}
+    with pytest.raises(BundleVerificationError, match="must be a string"):
+        verify_card(signed, expected_identity=IDENTITY)
+
+
+def test_bundle_card_tampered_payload_fails_before_sigstore():
+    signed, _ = _bundle_signed()
+    signed["name"] = "tampered"
+    with pytest.raises(BadSignature):
+        verify_card(signed, expected_identity=IDENTITY)
+
+
+def test_bundle_card_wrong_identity_fails_before_sigstore():
+    signed, _ = _bundle_signed()
+    with pytest.raises(IdentityMismatch):
+        verify_card(signed, expected_identity="https://evil.example/wf.yml@refs/heads/main")
