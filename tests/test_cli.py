@@ -249,6 +249,20 @@ def test_verify_non_object_card_errors_cleanly(tmp_path, capsys, payload, type_n
 
 
 @pytest.mark.parametrize(
+    "signatures",
+    ['{"signatures": 5}', '{"signatures": "x"}', '{"signatures": [1]}', '{"signatures": []}'],
+)
+def test_verify_malformed_signatures_fail_closed(tmp_path, capsys, signatures):
+    bad = tmp_path / "card.json"
+    bad.write_text(signatures)
+    rc = main(["verify", "--in", str(bad), "--identity", IDENTITY, "--no-require-rekor"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "Traceback" not in err
+    assert err.strip()
+
+
+@pytest.mark.parametrize(
     "content",
     [None, "{not json", "null"],
     ids=["missing", "malformed-json", "non-object"],
