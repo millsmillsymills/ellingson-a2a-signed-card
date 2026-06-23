@@ -119,15 +119,12 @@ def _enforce_trust(
     signature: dict[str, Any],
     cert: x509.Certificate,
     trust_root: TrustRoot,
-    expected_oidc_issuer: str | None,
+    expected_oidc_issuer: str,
 ) -> None:
     verify_chain(cert, _intermediates(signature), trust_root, at_time=datetime.now(UTC))
-    if expected_oidc_issuer is not None:
-        issuer = oidc_issuer(cert)
-        if issuer != expected_oidc_issuer:
-            raise UntrustedCertificate(
-                f"expected OIDC issuer {expected_oidc_issuer!r}, got {issuer!r}"
-            )
+    issuer = oidc_issuer(cert)
+    if issuer != expected_oidc_issuer:
+        raise UntrustedCertificate(f"expected OIDC issuer {expected_oidc_issuer!r}, got {issuer!r}")
 
 
 def verify_card(
@@ -152,13 +149,16 @@ def verify_card(
         trust_root: If set, cryptographically anchor trust by chaining the leaf
             to a trusted Fulcio root; a self-signed cert is then rejected. When
             absent, the hermetic self-signed-friendly path is kept unchanged.
-        expected_oidc_issuer: If set (with ``trust_root``), require the Fulcio
-            OIDC-issuer extension to equal this value.
+        expected_oidc_issuer: Required whenever ``trust_root`` is set; the Fulcio
+            OIDC-issuer extension must equal this value. Issuer pinning is the
+            central control of the anchored path, so omitting it is rejected
+            rather than silently anchoring the chain alone.
 
     Returns:
         A ``VerifyResult`` on success.
 
     Raises:
+        ValueError: If ``trust_root`` is set without ``expected_oidc_issuer``.
         MissingSignature, BadSignature, IdentityMismatch, CardExpired,
         UntrustedCertificate, MissingRekorEntry: On the corresponding failure.
     """
@@ -177,6 +177,11 @@ def verify_card(
     _check_freshness(cert, max_age)
 
     if trust_root is not None:
+        if expected_oidc_issuer is None:
+            raise ValueError(
+                "expected_oidc_issuer is required when trust_root is set: issuer "
+                "pinning is the central control of the anchored path"
+            )
         _enforce_trust(signature, cert, trust_root, expected_oidc_issuer)
 
     rekor_log_index = signature["header"].get("rekorLogIndex")
