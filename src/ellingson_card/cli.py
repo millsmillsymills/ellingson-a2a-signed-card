@@ -12,7 +12,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
-from ellingson_card.card import load_card
+from ellingson_card.card import CardError, load_card
 from ellingson_card.errors import VerificationError
 from ellingson_card.keys import generate_signing_material
 from ellingson_card.serve import WELL_KNOWN_PATH, make_server
@@ -22,7 +22,11 @@ from ellingson_card.verifier import verify_card
 
 
 def _cmd_sign(args: argparse.Namespace) -> int:
-    card = load_card(args.in_path)
+    try:
+        card = load_card(args.in_path)
+    except CardError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     if args.keyless:
         from ellingson_card.keyless import sign_card_keyless
 
