@@ -15,6 +15,9 @@ from ellingson_card.trust import (
     oidc_issuer,
     verify_chain,
 )
+from ellingson_card.trust import (
+    _der_utf8string as decode_der_utf8string,
+)
 
 IDENTITY = "https://github.com/ellingson/signed-card/.github/workflows/sign.yml@refs/tags/v1"
 ISSUER = "https://token.actions.githubusercontent.com"
@@ -198,6 +201,22 @@ def test_oidc_issuer_prefers_v2_over_v1():
     root_key, root = _ca("root")
     _, leaf = _leaf(root, root_key, issuer_oidc="https://legacy.example", issuer_oidc_v2=ISSUER)
     assert oidc_issuer(leaf) == ISSUER
+
+
+def test_der_utf8string_decodes_minimal_value():
+    assert decode_der_utf8string(b"\x0c\x02hi") == "hi"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"\x0c\x00",  # empty value
+        b"\x0c\x81\x02hi",  # non-minimal long form (fits short form)
+        b"\x0c\x82\x00\x02hi",  # leading-zero length octet
+    ],
+)
+def test_der_utf8string_rejects_non_minimal_der(raw):
+    assert decode_der_utf8string(raw) is None
 
 
 def test_cert_to_x5c_carries_chain():

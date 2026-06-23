@@ -119,7 +119,13 @@ def _raw_extension(cert: x509.Certificate, oid: x509.ObjectIdentifier) -> bytes 
 
 
 def _der_utf8string(data: bytes) -> str | None:
-    """Decode a single DER-encoded UTF8String, or ``None`` if malformed."""
+    """Decode a single DER-encoded UTF8String, or ``None`` if malformed.
+
+    Enforces strict DER: the length must use the minimal encoding (short form
+    below 128, no redundant or non-minimal long form) and the value must be
+    non-empty. An empty or meaninglessly-encoded issuer is treated as malformed
+    so the verifier fails closed, keeping the "malformed → None" contract uniform.
+    """
     if len(data) < 2 or data[0] != _DER_UTF8STRING_TAG:
         return None
     length_octet = data[1]
@@ -130,8 +136,11 @@ def _der_utf8string(data: bytes) -> str | None:
         if num_octets == 0 or len(data) < 2 + num_octets:
             return None
         start = 2 + num_octets
-        length = int.from_bytes(data[2:start], "big")
-    if len(data) != start + length:
+        length_bytes = data[2:start]
+        if length_bytes[0] == 0 or int.from_bytes(length_bytes, "big") < 0x80:
+            return None
+        length = int.from_bytes(length_bytes, "big")
+    if length == 0 or len(data) != start + length:
         return None
     try:
         return data[start : start + length].decode("utf-8")
