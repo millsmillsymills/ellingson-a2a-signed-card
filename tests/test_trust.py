@@ -186,7 +186,7 @@ def test_verify_chain_rejects_leaf_without_key_usage():
 def test_verify_chain_rejects_leaf_without_digital_signature_usage():
     root_key, root = _ca("root")
     _, leaf = _leaf(root, root_key, digital_signature=False)
-    with pytest.raises(UntrustedCertificate, match="key usage"):
+    with pytest.raises(UntrustedCertificate, match="digital signature"):
         verify_chain(leaf, [], TrustRoot((root,)), at_time=NOW)
 
 
