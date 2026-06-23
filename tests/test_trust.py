@@ -49,6 +49,20 @@ def _der_utf8string(value):
     return b"\x0c" + bytes([len(encoded)]) + encoded
 
 
+def _key_usage(digital_signature):
+    return x509.KeyUsage(
+        digital_signature=digital_signature,
+        content_commitment=False,
+        key_encipherment=False,
+        data_encipherment=False,
+        key_agreement=False,
+        key_cert_sign=False,
+        crl_sign=False,
+        encipher_only=False,
+        decipher_only=False,
+    )
+
+
 def _leaf(
     issuer_cert,
     issuer_key,
@@ -56,6 +70,8 @@ def _leaf(
     identity=IDENTITY,
     issuer_oidc=ISSUER,
     code_signing=True,
+    key_usage=True,
+    digital_signature=True,
     issuer_oidc_v2=None,
     not_after=None,
 ):
@@ -77,6 +93,8 @@ def _leaf(
         builder = builder.add_extension(
             x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]), critical=False
         )
+    if key_usage:
+        builder = builder.add_extension(_key_usage(digital_signature), critical=True)
     if issuer_oidc is not None:
         builder = builder.add_extension(
             x509.UnrecognizedExtension(FULCIO_OIDC_ISSUER_OID, issuer_oidc.encode()), critical=False
@@ -155,6 +173,20 @@ def test_verify_chain_rejects_non_ca_intermediate():
 def test_verify_chain_rejects_leaf_without_code_signing_eku():
     root_key, root = _ca("root")
     _, leaf = _leaf(root, root_key, code_signing=False)
+    with pytest.raises(UntrustedCertificate):
+        verify_chain(leaf, [], TrustRoot((root,)), at_time=NOW)
+
+
+def test_verify_chain_rejects_leaf_without_key_usage():
+    root_key, root = _ca("root")
+    _, leaf = _leaf(root, root_key, key_usage=False)
+    with pytest.raises(UntrustedCertificate):
+        verify_chain(leaf, [], TrustRoot((root,)), at_time=NOW)
+
+
+def test_verify_chain_rejects_leaf_without_digital_signature_usage():
+    root_key, root = _ca("root")
+    _, leaf = _leaf(root, root_key, digital_signature=False)
     with pytest.raises(UntrustedCertificate):
         verify_chain(leaf, [], TrustRoot((root,)), at_time=NOW)
 

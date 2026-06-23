@@ -69,6 +69,20 @@ def _ca_signed(identity=IDENTITY, oidc_issuer=OIDC_ISSUER):
             x509.SubjectAlternativeName([x509.UniformResourceIdentifier(identity)]), critical=False
         )
         .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]), critical=False)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
     )
     if oidc_issuer is not None:
         builder = builder.add_extension(
