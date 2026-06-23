@@ -20,6 +20,7 @@ from ellingson_card.trust import (
 from ellingson_card.trust import (
     _der_utf8string as decode_der_utf8string,
 )
+from tests.conftest import key_usage as build_key_usage
 
 IDENTITY = "https://github.com/ellingson/signed-card/.github/workflows/sign.yml@refs/tags/v1"
 ISSUER = "https://token.actions.githubusercontent.com"
@@ -52,20 +53,6 @@ def _ca(cn, *, issuer_cert=None, issuer_key=None, path_length=None):
 def _der_utf8string(value):
     encoded = value.encode("utf-8")
     return b"\x0c" + bytes([len(encoded)]) + encoded
-
-
-def _key_usage(digital_signature):
-    return x509.KeyUsage(
-        digital_signature=digital_signature,
-        content_commitment=False,
-        key_encipherment=False,
-        data_encipherment=False,
-        key_agreement=False,
-        key_cert_sign=False,
-        crl_sign=False,
-        encipher_only=False,
-        decipher_only=False,
-    )
 
 
 def _leaf(
@@ -101,7 +88,9 @@ def _leaf(
             x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]), critical=False
         )
     if key_usage:
-        builder = builder.add_extension(_key_usage(digital_signature), critical=key_usage_critical)
+        builder = builder.add_extension(
+            build_key_usage(digital_signature), critical=key_usage_critical
+        )
     if issuer_oidc is not None:
         builder = builder.add_extension(
             x509.UnrecognizedExtension(FULCIO_OIDC_ISSUER_OID, issuer_oidc.encode()), critical=False
@@ -190,14 +179,14 @@ def test_verify_chain_rejects_leaf_without_code_signing_eku():
 def test_verify_chain_rejects_leaf_without_key_usage():
     root_key, root = _ca("root")
     _, leaf = _leaf(root, root_key, key_usage=False)
-    with pytest.raises(UntrustedCertificate):
+    with pytest.raises(UntrustedCertificate, match="key usage"):
         verify_chain(leaf, [], TrustRoot((root,)), at_time=NOW)
 
 
 def test_verify_chain_rejects_leaf_without_digital_signature_usage():
     root_key, root = _ca("root")
     _, leaf = _leaf(root, root_key, digital_signature=False)
-    with pytest.raises(UntrustedCertificate):
+    with pytest.raises(UntrustedCertificate, match="key usage"):
         verify_chain(leaf, [], TrustRoot((root,)), at_time=NOW)
 
 
@@ -273,6 +262,13 @@ def test_der_utf8string_rejects_non_minimal_der(raw):
         b"\x0c\x05hi",  # declared length exceeds payload
         b"\x0c\x02hi!",  # trailing bytes after declared length
         b"\x0c\x01\xff",  # invalid UTF-8 payload
+    ],
+    ids=[
+        "wrong-tag",
+        "truncated-long-form-length",
+        "length-exceeds-payload",
+        "trailing-bytes",
+        "invalid-utf8",
     ],
 )
 def test_oidc_issuer_malformed_v2_fails_closed(raw_v2):
