@@ -165,6 +165,8 @@ def verify_card(
     signatures = card_json.get("signatures")
     if not signatures:
         raise MissingSignature("card has no signatures")
+    if not isinstance(signatures, list) or not isinstance(signatures[0], dict):
+        raise MissingSignature("card signatures must be a non-empty array of objects")
     signature = signatures[0]
 
     cert = _load_cert(signature)
