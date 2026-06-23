@@ -1,4 +1,5 @@
 import base64
+import logging
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -174,6 +175,33 @@ def test_default_checker_rejects_when_entry_absent(monkeypatch):
         verify_card(signed, expected_identity=IDENTITY)
 
 
+def test_default_checker_logs_debug_when_entry_absent(monkeypatch, caplog):
+    caplog.set_level(logging.DEBUG, logger=verifier_mod.__name__)
+    monkeypatch.setattr(verifier_mod, "fetch_entry_body", lambda *_a, **_k: None)
+    assert not verifier_mod.default_rekor_checker(7, "a" * 64, b"\x30\x06")
+    records = [r for r in caplog.records if r.name == verifier_mod.__name__]
+    assert any(r.levelno == logging.DEBUG for r in records)
+    assert not any(r.levelno == logging.WARNING for r in records)
+
+
+def test_default_checker_logs_warning_when_entry_does_not_bind(monkeypatch, caplog):
+    caplog.set_level(logging.DEBUG, logger=verifier_mod.__name__)
+    unbound = {
+        "kind": "hashedrekord",
+        "apiVersion": "0.0.1",
+        "spec": {
+            "data": {"hash": {"algorithm": "sha256", "value": "0" * 64}},
+            "signature": {
+                "content": base64.b64encode(b"\x30\x06\x02\x01\x09\x02\x01\x09").decode()
+            },
+        },
+    }
+    monkeypatch.setattr(verifier_mod, "fetch_entry_body", lambda *_a, **_k: unbound)
+    assert not verifier_mod.default_rekor_checker(7, "a" * 64, b"\x30\x44")
+    records = [r for r in caplog.records if r.name == verifier_mod.__name__]
+    assert any(r.levelno == logging.WARNING for r in records)
+
+
 def test_non_int_rekor_index_fails_closed():
     signed = _signed(rekor_log_index=7)
     signed["signatures"][0]["header"]["rekorLogIndex"] = "7; DROP"
@@ -222,6 +250,18 @@ def test_self_signed_rejected_when_trust_root_configured():
             expected_identity=IDENTITY,
             require_rekor=False,
             trust_root=TrustRoot((root,)),
+            expected_oidc_issuer=OIDC_ISSUER,
+        )
+
+
+def test_trust_root_without_expected_oidc_issuer_is_rejected():
+    signed, trust_root = _ca_signed()
+    with pytest.raises(ValueError, match="expected_oidc_issuer"):
+        verify_card(
+            signed,
+            expected_identity=IDENTITY,
+            require_rekor=False,
+            trust_root=trust_root,
         )
 
 

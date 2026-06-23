@@ -10,6 +10,7 @@ from ellingson_card.errors import UntrustedCertificate
 from ellingson_card.keys import cert_to_x5c, x5c_to_cert
 from ellingson_card.trust import (
     FULCIO_OIDC_ISSUER_OID,
+    FULCIO_OIDC_ISSUER_V2_OID,
     TrustRoot,
     oidc_issuer,
     verify_chain,
@@ -43,6 +44,11 @@ def _ca(cn, *, issuer_cert=None, issuer_key=None, path_length=None):
     return key, cert
 
 
+def _der_utf8string(value):
+    encoded = value.encode("utf-8")
+    return b"\x0c" + bytes([len(encoded)]) + encoded
+
+
 def _leaf(
     issuer_cert,
     issuer_key,
@@ -50,6 +56,7 @@ def _leaf(
     identity=IDENTITY,
     issuer_oidc=ISSUER,
     code_signing=True,
+    issuer_oidc_v2=None,
     not_after=None,
 ):
     key = ec.generate_private_key(ec.SECP256R1())
@@ -73,6 +80,11 @@ def _leaf(
     if issuer_oidc is not None:
         builder = builder.add_extension(
             x509.UnrecognizedExtension(FULCIO_OIDC_ISSUER_OID, issuer_oidc.encode()), critical=False
+        )
+    if issuer_oidc_v2 is not None:
+        builder = builder.add_extension(
+            x509.UnrecognizedExtension(FULCIO_OIDC_ISSUER_V2_OID, _der_utf8string(issuer_oidc_v2)),
+            critical=False,
         )
     return key, builder.sign(issuer_key, hashes.SHA256())
 
@@ -174,6 +186,18 @@ def test_oidc_issuer_none_when_absent():
     root_key, root = _ca("root")
     _, leaf = _leaf(root, root_key, issuer_oidc=None)
     assert oidc_issuer(leaf) is None
+
+
+def test_oidc_issuer_reads_v2_der_utf8string():
+    root_key, root = _ca("root")
+    _, leaf = _leaf(root, root_key, issuer_oidc=None, issuer_oidc_v2=ISSUER)
+    assert oidc_issuer(leaf) == ISSUER
+
+
+def test_oidc_issuer_prefers_v2_over_v1():
+    root_key, root = _ca("root")
+    _, leaf = _leaf(root, root_key, issuer_oidc="https://legacy.example", issuer_oidc_v2=ISSUER)
+    assert oidc_issuer(leaf) == ISSUER
 
 
 def test_cert_to_x5c_carries_chain():

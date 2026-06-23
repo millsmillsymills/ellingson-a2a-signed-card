@@ -43,8 +43,11 @@ def fetch_entry_body(
     Returns:
         The decoded entry body (a ``hashedrekord`` dict) if present, or ``None``
         if no entry exists at the index (HTTP 404), the response is malformed, or
-        the returned entry's own ``logIndex`` does not match the requested index
-        (so the authenticated index, not just the binding, points at this entry).
+        the returned entry's own ``logIndex`` does not match the requested index.
+        That last check is a self-consistency check that the server returned the
+        entry we asked for -- the value is server-echoed, not a cryptographic
+        inclusion proof or SET; binding to the signature (``entry_binds``) is the
+        real control.
 
     Raises:
         urllib.error.URLError: On network failure (the verifier then fails closed
@@ -114,9 +117,14 @@ def entry_binds(
     unsupported schema version, or any structural surprise returns ``False`` so
     the verifier fails closed.
 
-    The ``apiVersion`` is pinned because the ``hashedrekord`` spec field layout
-    differs across versions (0.0.1 vs 0.0.2); reading a newer schema with the
-    0.0.1 field paths would silently misbind, so an unknown version is rejected.
+    Two things are pinned. The ``apiVersion`` is rejected if unknown because the
+    ``hashedrekord`` spec layout differs across versions: a 0.0.2 body nests under
+    ``spec.hashedRekordV002``, so reading it with 0.0.1 field paths fails closed
+    (every lookup misses, so the entry simply fails to bind) -- pinning keeps a
+    future schema from ever being parsed under stale paths. The hash algorithm is
+    pinned to ``sha256`` because hashedrekord 0.0.1 itself also accepts sha384 and
+    sha512; without the pin, a same-version digest-algorithm swap is the real
+    misbind risk.
     """
     if body.get("kind") != "hashedrekord":
         logger.debug("Rekor entry kind is %r, not hashedrekord", body.get("kind"))
