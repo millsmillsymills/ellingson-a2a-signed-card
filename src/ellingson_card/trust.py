@@ -26,6 +26,10 @@ from ellingson_card.errors import UntrustedCertificate
 
 # Fulcio v1 OIDC-issuer extension (the plain-string form).
 FULCIO_OIDC_ISSUER_OID = x509.ObjectIdentifier("1.3.6.1.4.1.57264.1.1")
+# Fulcio v2 OIDC-issuer extension (DER-encoded UTF8String); current default.
+FULCIO_OIDC_ISSUER_V2_OID = x509.ObjectIdentifier("1.3.6.1.4.1.57264.1.8")
+
+_DER_UTF8STRING_TAG = 0x0C
 
 _MAX_CHAIN_DEPTH = 8
 
@@ -77,16 +81,53 @@ def verify_chain(
 
 
 def oidc_issuer(cert: x509.Certificate) -> str | None:
-    """Return the Fulcio OIDC-issuer extension value, or ``None`` if absent."""
+    """Return the Fulcio OIDC-issuer extension value, or ``None`` if absent.
+
+    Modern Fulcio certs carry the issuer in the DER-encoded UTF8String extension
+    ``.1.8``; older ones used the plain-string ``.1.1``. Prefers ``.1.8`` when
+    present (a malformed ``.1.8`` yields ``None`` so the verifier fails closed
+    rather than reading the legacy field), and falls back to ``.1.1`` otherwise.
+    """
+    raw_v2 = _raw_extension(cert, FULCIO_OIDC_ISSUER_V2_OID)
+    if raw_v2 is not None:
+        return _der_utf8string(raw_v2)
+    raw_v1 = _raw_extension(cert, FULCIO_OIDC_ISSUER_OID)
+    if raw_v1 is None:
+        return None
     try:
-        ext = cert.extensions.get_extension_for_oid(FULCIO_OIDC_ISSUER_OID)
+        return raw_v1.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _raw_extension(cert: x509.Certificate, oid: x509.ObjectIdentifier) -> bytes | None:
+    try:
+        ext = cert.extensions.get_extension_for_oid(oid)
     except x509.ExtensionNotFound:
         return None
     value = ext.value
     if not isinstance(value, x509.UnrecognizedExtension):
         return None
+    return value.value
+
+
+def _der_utf8string(data: bytes) -> str | None:
+    """Decode a single DER-encoded UTF8String, or ``None`` if malformed."""
+    if len(data) < 2 or data[0] != _DER_UTF8STRING_TAG:
+        return None
+    length_octet = data[1]
+    if length_octet < 0x80:
+        start, length = 2, length_octet
+    else:
+        num_octets = length_octet & 0x7F
+        if num_octets == 0 or len(data) < 2 + num_octets:
+            return None
+        start = 2 + num_octets
+        length = int.from_bytes(data[2:start], "big")
+    if len(data) != start + length:
+        return None
     try:
-        return value.value.decode("utf-8")
+        return data[start : start + length].decode("utf-8")
     except UnicodeDecodeError:
         return None
 
