@@ -5,6 +5,8 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from hypothesis import given
+from hypothesis import strategies as st
 
 from ellingson_card.errors import UntrustedCertificate
 from ellingson_card.keys import cert_to_x5c, x5c_to_cert
@@ -61,6 +63,7 @@ def _leaf(
     issuer_oidc=ISSUER,
     code_signing=True,
     key_usage=True,
+    key_usage_critical=True,
     digital_signature=True,
     issuer_oidc_v2=None,
     issuer_oidc_v2_raw=None,
@@ -85,7 +88,9 @@ def _leaf(
             x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]), critical=False
         )
     if key_usage:
-        builder = builder.add_extension(build_key_usage(digital_signature), critical=True)
+        builder = builder.add_extension(
+            build_key_usage(digital_signature), critical=key_usage_critical
+        )
     if issuer_oidc is not None:
         builder = builder.add_extension(
             x509.UnrecognizedExtension(FULCIO_OIDC_ISSUER_OID, issuer_oidc.encode()), critical=False
@@ -185,6 +190,13 @@ def test_verify_chain_rejects_leaf_without_digital_signature_usage():
         verify_chain(leaf, [], TrustRoot((root,)), at_time=NOW)
 
 
+def test_verify_chain_rejects_non_critical_key_usage():
+    root_key, root = _ca("root")
+    _, leaf = _leaf(root, root_key, key_usage_critical=False)
+    with pytest.raises(UntrustedCertificate, match="key usage"):
+        verify_chain(leaf, [], TrustRoot((root,)), at_time=NOW)
+
+
 def test_verify_chain_rejects_pathlen_zero_intermediate_signing_intermediate():
     root_key, root = _ca("root")
     zero_key, zero = _ca("pathlen-zero", issuer_cert=root, issuer_key=root_key, path_length=0)
@@ -272,8 +284,40 @@ def test_der_utf8string_decodes_long_form_length():
     assert decode_der_utf8string(der) == value
 
 
+def test_der_utf8string_accepts_long_form_length_boundary():
+    value = "a" * 128
+    der = b"\x0c\x81\x80" + value.encode("utf-8")
+    assert decode_der_utf8string(der) == value
+
+
+def test_der_utf8string_rejects_indefinite_length():
+    assert decode_der_utf8string(b"\x0c\x80") is None
+
+
 def test_der_utf8string_rejects_invalid_utf8():
     assert decode_der_utf8string(b"\x0c\x01\xff") is None
+
+
+def _minimal_der_utf8string(text):
+    encoded = text.encode("utf-8")
+    length = len(encoded)
+    if length < 0x80:
+        length_octets = bytes([length])
+    else:
+        body = length.to_bytes((length.bit_length() + 7) // 8, "big")
+        length_octets = bytes([0x80 | len(body)]) + body
+    return b"\x0c" + length_octets + encoded
+
+
+@given(st.binary())
+def test_der_utf8string_never_raises_on_arbitrary_bytes(data):
+    decode_der_utf8string(data)
+
+
+@given(st.text(min_size=1))
+def test_der_utf8string_round_trips_valid_encodings(text):
+    der = _minimal_der_utf8string(text)
+    assert decode_der_utf8string(der) == text
 
 
 def test_cert_to_x5c_carries_chain():
