@@ -15,6 +15,9 @@ from ellingson_card.trust import (
     oidc_issuer,
     verify_chain,
 )
+from ellingson_card.trust import (
+    _der_utf8string as decode_der_utf8string,
+)
 
 IDENTITY = "https://github.com/ellingson/signed-card/.github/workflows/sign.yml@refs/tags/v1"
 ISSUER = "https://token.actions.githubusercontent.com"
@@ -57,6 +60,7 @@ def _leaf(
     issuer_oidc=ISSUER,
     code_signing=True,
     issuer_oidc_v2=None,
+    issuer_oidc_v2_raw=None,
     not_after=None,
 ):
     key = ec.generate_private_key(ec.SECP256R1())
@@ -81,9 +85,12 @@ def _leaf(
         builder = builder.add_extension(
             x509.UnrecognizedExtension(FULCIO_OIDC_ISSUER_OID, issuer_oidc.encode()), critical=False
         )
-    if issuer_oidc_v2 is not None:
+    raw_v2 = issuer_oidc_v2_raw
+    if raw_v2 is None and issuer_oidc_v2 is not None:
+        raw_v2 = _der_utf8string(issuer_oidc_v2)
+    if raw_v2 is not None:
         builder = builder.add_extension(
-            x509.UnrecognizedExtension(FULCIO_OIDC_ISSUER_V2_OID, _der_utf8string(issuer_oidc_v2)),
+            x509.UnrecognizedExtension(FULCIO_OIDC_ISSUER_V2_OID, raw_v2),
             critical=False,
         )
     return key, builder.sign(issuer_key, hashes.SHA256())
@@ -198,6 +205,33 @@ def test_oidc_issuer_prefers_v2_over_v1():
     root_key, root = _ca("root")
     _, leaf = _leaf(root, root_key, issuer_oidc="https://legacy.example", issuer_oidc_v2=ISSUER)
     assert oidc_issuer(leaf) == ISSUER
+
+
+@pytest.mark.parametrize(
+    "raw_v2",
+    [
+        b"\x0d\x05hello",  # wrong tag (not UTF8String)
+        b"\x0c\x82\x00",  # long-form length octets truncated
+        b"\x0c\x05hi",  # declared length exceeds payload
+        b"\x0c\x02hi!",  # trailing bytes after declared length
+        b"\x0c\x01\xff",  # invalid UTF-8 payload
+    ],
+)
+def test_oidc_issuer_malformed_v2_fails_closed(raw_v2):
+    root_key, root = _ca("root")
+    _, leaf = _leaf(root, root_key, issuer_oidc=ISSUER, issuer_oidc_v2_raw=raw_v2)
+    assert oidc_issuer(leaf) is None
+
+
+def test_der_utf8string_decodes_long_form_length():
+    value = "x" * 200
+    encoded = value.encode("utf-8")
+    der = b"\x0c\x81" + bytes([len(encoded)]) + encoded
+    assert decode_der_utf8string(der) == value
+
+
+def test_der_utf8string_rejects_invalid_utf8():
+    assert decode_der_utf8string(b"\x0c\x01\xff") is None
 
 
 def test_cert_to_x5c_carries_chain():
