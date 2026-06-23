@@ -81,6 +81,27 @@ def _write_anchored(tmp_path):
     return card, root
 
 
+def test_verify_staging_routes_rekor_to_staging(tmp_path, monkeypatch, capsys):
+    from ellingson_card import cli as cli_mod
+    from ellingson_card.rekor import STAGING_REKOR_URL
+
+    captured = {}
+
+    def spy(base_url):
+        captured["base_url"] = base_url
+        return lambda *_args: True
+
+    monkeypatch.setattr(cli_mod, "make_rekor_checker", spy)
+    out = tmp_path / "signed.json"
+    main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
+    card = json.loads(out.read_text())
+    card["signatures"][0]["header"]["rekorLogIndex"] = 7
+    out.write_text(json.dumps(card))
+    rc = main(["verify", "--in", str(out), "--identity", IDENTITY, "--staging"])
+    assert rc == 0
+    assert captured["base_url"] == STAGING_REKOR_URL
+
+
 def test_verify_anchored_against_trust_root(tmp_path, capsys):
     card, root = _write_anchored(tmp_path)
     rc = main(

@@ -15,10 +15,11 @@ from pathlib import Path
 from ellingson_card.card import CardError, load_card, read_card
 from ellingson_card.errors import VerificationError
 from ellingson_card.keys import generate_signing_material
+from ellingson_card.rekor import STAGING_REKOR_URL
 from ellingson_card.serve import WELL_KNOWN_PATH, make_server
 from ellingson_card.signer import attach_signature, sign_card
 from ellingson_card.trust import TrustRoot
-from ellingson_card.verifier import verify_card
+from ellingson_card.verifier import default_rekor_checker, make_rekor_checker, verify_card
 
 
 def _cmd_sign(args: argparse.Namespace) -> int:
@@ -65,11 +66,13 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
     max_age = timedelta(seconds=args.max_age) if args.max_age is not None else None
+    rekor_checker = make_rekor_checker(STAGING_REKOR_URL) if args.staging else default_rekor_checker
     try:
         result = verify_card(
             card,
             expected_identity=args.identity,
             require_rekor=args.require_rekor,
+            rekor_checker=rekor_checker,
             max_age=max_age,
             trust_root=trust_root,
             expected_oidc_issuer=args.oidc_issuer,
@@ -108,6 +111,11 @@ def _build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--identity", required=True)
     verify.add_argument("--no-require-rekor", dest="require_rekor", action="store_false")
     verify.add_argument("--max-age", type=int, default=None, help="max signature age in seconds")
+    verify.add_argument(
+        "--staging",
+        action="store_true",
+        help="check Rekor against the Sigstore staging instance",
+    )
     verify.add_argument(
         "--trust-root",
         dest="trust_root",

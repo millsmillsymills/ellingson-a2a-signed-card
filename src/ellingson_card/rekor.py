@@ -22,6 +22,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 DEFAULT_REKOR_URL = "https://rekor.sigstore.dev"
+STAGING_REKOR_URL = "https://rekor.sigstage.dev"
 
 SUPPORTED_HASHEDREKORD_APIVERSION = "0.0.1"
 EXPECTED_HASH_ALGORITHM = "sha256"
