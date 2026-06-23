@@ -236,10 +236,35 @@ def test_verify_missing_card_file_errors_cleanly(tmp_path, capsys):
     assert "cannot read card" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("payload", ["[]", '"x"', "42", "null"])
-def test_verify_non_object_card_errors_cleanly(tmp_path, capsys, payload):
+@pytest.mark.parametrize(
+    ("payload", "type_name"),
+    [("[]", "list"), ('"x"', "str"), ("42", "int"), ("null", "NoneType")],
+)
+def test_verify_non_object_card_errors_cleanly(tmp_path, capsys, payload, type_name):
     bad = tmp_path / "scalar.json"
     bad.write_text(payload)
     rc = main(["verify", "--in", str(bad), "--identity", IDENTITY, "--no-require-rekor"])
     assert rc == 1
-    assert "card must be a JSON object" in capsys.readouterr().err
+    assert capsys.readouterr().err.strip() == f"card must be a JSON object, got {type_name}"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [None, "{not json", "null"],
+    ids=["missing", "malformed-json", "non-object"],
+)
+def test_sign_and_verify_emit_identical_stderr(tmp_path, capsys, content):
+    bad = tmp_path / "card.json"
+    if content is not None:
+        bad.write_text(content)
+    out = tmp_path / "signed.json"
+
+    sign_rc = main(["sign", "--in", str(bad), "--out", str(out), "--identity", IDENTITY])
+    sign_err = capsys.readouterr().err
+    verify_rc = main(["verify", "--in", str(bad), "--identity", IDENTITY, "--no-require-rekor"])
+    verify_err = capsys.readouterr().err
+
+    assert sign_rc == 1
+    assert verify_rc == 1
+    assert sign_err.strip()
+    assert sign_err == verify_err
