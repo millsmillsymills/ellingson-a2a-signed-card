@@ -17,6 +17,7 @@ from ellingson_card.errors import VerificationError
 from ellingson_card.keys import generate_signing_material
 from ellingson_card.serve import WELL_KNOWN_PATH, make_server
 from ellingson_card.signer import attach_signature, sign_card
+from ellingson_card.trust import TrustRoot
 from ellingson_card.verifier import verify_card
 
 
@@ -40,12 +41,15 @@ def _cmd_sign(args: argparse.Namespace) -> int:
 def _cmd_verify(args: argparse.Namespace) -> int:
     card = json.loads(args.in_path.read_text())
     max_age = timedelta(seconds=args.max_age) if args.max_age is not None else None
+    trust_root = TrustRoot.from_pem(args.trust_root.read_bytes()) if args.trust_root else None
     try:
         result = verify_card(
             card,
             expected_identity=args.identity,
             require_rekor=args.require_rekor,
             max_age=max_age,
+            trust_root=trust_root,
+            expected_oidc_issuer=args.oidc_issuer,
         )
     except VerificationError as exc:
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
@@ -81,6 +85,19 @@ def _build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--identity", required=True)
     verify.add_argument("--no-require-rekor", dest="require_rekor", action="store_false")
     verify.add_argument("--max-age", type=int, default=None, help="max signature age in seconds")
+    verify.add_argument(
+        "--trust-root",
+        dest="trust_root",
+        type=Path,
+        default=None,
+        help="PEM bundle of Fulcio CA anchors; enables cryptographic trust anchoring",
+    )
+    verify.add_argument(
+        "--oidc-issuer",
+        dest="oidc_issuer",
+        default=None,
+        help="required with --trust-root: the Fulcio OIDC-issuer extension to pin",
+    )
     verify.set_defaults(func=_cmd_verify)
 
     serve = sub.add_parser("serve", help="serve a signed card at the well-known path")
@@ -92,7 +109,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point. Returns a process exit code."""
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    if args.command == "verify" and bool(args.trust_root) != bool(args.oidc_issuer):
+        parser.error("--trust-root and --oidc-issuer must be given together")
     return int(args.func(args))
 
 

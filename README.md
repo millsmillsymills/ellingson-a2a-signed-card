@@ -71,6 +71,11 @@ pinned. "Rekor inclusion is checked, not assumed" — the verifier fetches the l
 entry and binds it to the artifact digest and signature it is verifying, so a
 real-but-unrelated log index in the header cannot satisfy the check.
 
+To cryptographically anchor trust to a Fulcio root instead of string-matching a
+self-signed cert, pass `verify --trust-root <fulcio-roots.pem> --oidc-issuer
+<issuer>`: the leaf is then chained to a trusted anchor and its Fulcio
+OIDC-issuer extension is pinned. The two flags are required together.
+
 ## Why not `sigstore-a2a`?
 
 `RedDotRocket/sigstore-a2a` wraps the card as `{agentCard, verificationMaterial}`
