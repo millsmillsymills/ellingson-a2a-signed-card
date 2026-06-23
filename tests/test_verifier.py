@@ -281,7 +281,7 @@ def test_ca_issued_cert_verifies_against_trust_root():
 
 def test_oidc_issuer_absent_rejected():
     signed, trust_root = _ca_signed(oidc_issuer=None)
-    with pytest.raises(UntrustedCertificate, match="OIDC issuer"):
+    with pytest.raises(UntrustedCertificate, match="got None"):
         verify_card(
             signed,
             expected_identity=IDENTITY,
