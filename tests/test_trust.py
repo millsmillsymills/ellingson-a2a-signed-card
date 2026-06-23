@@ -311,10 +311,11 @@ def _minimal_der_utf8string(text):
 
 @given(st.binary())
 def test_der_utf8string_never_raises_on_arbitrary_bytes(data):
-    decode_der_utf8string(data)
+    result = decode_der_utf8string(data)
+    assert result is None or isinstance(result, str)
 
 
-@given(st.text(min_size=1))
+@given(st.text(min_size=1, alphabet=st.characters(exclude_categories=["Cs"])))
 def test_der_utf8string_round_trips_valid_encodings(text):
     der = _minimal_der_utf8string(text)
     assert decode_der_utf8string(der) == text
