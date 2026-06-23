@@ -81,9 +81,17 @@ def _write_anchored(tmp_path):
     return card, root
 
 
-def test_verify_staging_routes_rekor_to_staging(tmp_path, monkeypatch, capsys):
+def _signed_with_index(tmp_path):
+    out = tmp_path / "signed.json"
+    main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
+    card = json.loads(out.read_text())
+    card["signatures"][0]["header"]["rekorLogIndex"] = 7
+    out.write_text(json.dumps(card))
+    return out
+
+
+def _spy_rekor_base_url(monkeypatch):
     from ellingson_card import cli as cli_mod
-    from ellingson_card.rekor import STAGING_REKOR_URL
 
     captured = {}
 
@@ -92,14 +100,65 @@ def test_verify_staging_routes_rekor_to_staging(tmp_path, monkeypatch, capsys):
         return lambda *_args: True
 
     monkeypatch.setattr(cli_mod, "make_rekor_checker", spy)
-    out = tmp_path / "signed.json"
-    main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
-    card = json.loads(out.read_text())
-    card["signatures"][0]["header"]["rekorLogIndex"] = 7
-    out.write_text(json.dumps(card))
+    return captured
+
+
+def test_verify_staging_routes_rekor_to_staging(tmp_path, monkeypatch):
+    from ellingson_card.rekor import STAGING_REKOR_URL
+
+    captured = _spy_rekor_base_url(monkeypatch)
+    out = _signed_with_index(tmp_path)
     rc = main(["verify", "--in", str(out), "--identity", IDENTITY, "--staging"])
     assert rc == 0
     assert captured["base_url"] == STAGING_REKOR_URL
+
+
+def test_verify_without_staging_routes_rekor_to_production(tmp_path, monkeypatch):
+    from ellingson_card.rekor import DEFAULT_REKOR_URL
+
+    captured = _spy_rekor_base_url(monkeypatch)
+    out = _signed_with_index(tmp_path)
+    rc = main(["verify", "--in", str(out), "--identity", IDENTITY])
+    assert rc == 0
+    assert captured["base_url"] == DEFAULT_REKOR_URL
+
+
+def test_verify_staging_with_trust_root_is_rejected(tmp_path, capsys):
+    card, root = _write_anchored(tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "verify",
+                "--in",
+                str(card),
+                "--identity",
+                IDENTITY,
+                "--staging",
+                "--trust-root",
+                str(root),
+                "--oidc-issuer",
+                OIDC_ISSUER,
+            ]
+        )
+    assert exc.value.code == 2
+    assert "cannot be combined with --trust-root" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("flag", "expected"), [(["--staging"], True), ([], False)])
+def test_sign_keyless_forwards_staging(tmp_path, monkeypatch, flag, expected):
+    from ellingson_card import keyless as keyless_mod
+
+    captured = {}
+
+    def fake_keyless(card, *, staging):
+        captured["staging"] = staging
+        return {"protected": "x", "signature": "y", "header": {}}
+
+    monkeypatch.setattr(keyless_mod, "sign_card_keyless", fake_keyless)
+    out = tmp_path / "signed.json"
+    rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--keyless", *flag])
+    assert rc == 0
+    assert captured["staging"] is expected
 
 
 def test_verify_anchored_against_trust_root(tmp_path, capsys):
