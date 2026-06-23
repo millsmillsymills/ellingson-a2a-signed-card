@@ -38,10 +38,38 @@ def _cmd_sign(args: argparse.Namespace) -> int:
     return 0
 
 
+class _LoadError(Exception):
+    """A pre-verification input could not be read; carries a stderr message."""
+
+
+def _load_card(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text())
+    except OSError as exc:
+        raise _LoadError(f"cannot read card {path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise _LoadError(f"invalid card JSON {path}: {exc}") from exc
+
+
+def _load_trust_root(path: Path | None) -> TrustRoot | None:
+    if path is None:
+        return None
+    try:
+        return TrustRoot.from_pem(path.read_bytes())
+    except OSError as exc:
+        raise _LoadError(f"cannot read trust root {path}: {exc}") from exc
+    except ValueError as exc:
+        raise _LoadError(f"invalid trust-root PEM {path}: {exc}") from exc
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
-    card = json.loads(args.in_path.read_text())
+    try:
+        card = _load_card(args.in_path)
+        trust_root = _load_trust_root(args.trust_root)
+    except _LoadError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     max_age = timedelta(seconds=args.max_age) if args.max_age is not None else None
-    trust_root = TrustRoot.from_pem(args.trust_root.read_bytes()) if args.trust_root else None
     try:
         result = verify_card(
             card,
