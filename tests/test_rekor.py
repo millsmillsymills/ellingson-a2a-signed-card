@@ -159,10 +159,24 @@ def test_entry_binds_false_on_wrong_kind():
 
 def test_entry_binds_false_on_malformed_spec():
     assert not rekor.entry_binds(
-        {"kind": "hashedrekord", "spec": "nope"},
+        {"kind": "hashedrekord", "apiVersion": "0.0.1", "spec": "nope"},
         artifact_sha256_hex=ARTIFACT_HEX,
         signature_der=SIG_DER,
     )
+
+
+def test_entry_binds_false_on_v002_shaped_body():
+    body = {
+        "kind": "hashedrekord",
+        "apiVersion": "0.0.2",
+        "spec": {
+            "hashedRekordV002": {
+                "data": {"algorithm": "SHA2_256", "digest": ARTIFACT_HEX},
+                "signature": {"content": base64.b64encode(SIG_DER).decode()},
+            }
+        },
+    }
+    assert not rekor.entry_binds(body, artifact_sha256_hex=ARTIFACT_HEX, signature_der=SIG_DER)
 
 
 def test_entry_binds_false_on_non_str_signature_content():
@@ -248,5 +262,38 @@ def test_fetch_entry_body_logs_warning_on_non_200(caplog, monkeypatch):
         status = 500
 
     monkeypatch.setattr(rekor.urllib.request, "urlopen", lambda url, timeout: _ErrResp({}))
+    rekor.fetch_entry_body(42)
+    assert _records_at(caplog, logging.WARNING)
+
+
+def test_fetch_entry_body_logs_warning_on_index_mismatch(caplog, monkeypatch):
+    caplog.set_level(logging.DEBUG, logger=rekor.__name__)
+    _patch_urlopen(monkeypatch, _rekor_payload(_body(), log_index=99))
+    rekor.fetch_entry_body(42)
+    assert _records_at(caplog, logging.WARNING)
+
+
+def test_fetch_entry_body_logs_warning_on_missing_index(caplog, monkeypatch):
+    caplog.set_level(logging.DEBUG, logger=rekor.__name__)
+    payload = _rekor_payload(_body())
+    del payload["uuid123"]["logIndex"]
+    _patch_urlopen(monkeypatch, payload)
+    rekor.fetch_entry_body(42)
+    assert _records_at(caplog, logging.WARNING)
+
+
+def test_fetch_entry_body_logs_debug_on_missing_body(caplog, monkeypatch):
+    caplog.set_level(logging.DEBUG, logger=rekor.__name__)
+    payload = _rekor_payload(_body())
+    del payload["uuid123"]["body"]
+    _patch_urlopen(monkeypatch, payload)
+    rekor.fetch_entry_body(42)
+    assert _records_at(caplog, logging.DEBUG)
+    assert not _records_at(caplog, logging.WARNING)
+
+
+def test_fetch_entry_body_logs_warning_on_bad_base64_body(caplog, monkeypatch):
+    caplog.set_level(logging.DEBUG, logger=rekor.__name__)
+    _patch_urlopen(monkeypatch, {"uuid": {"logIndex": 42, "body": "!!!not-base64!!!"}})
     rekor.fetch_entry_body(42)
     assert _records_at(caplog, logging.WARNING)
