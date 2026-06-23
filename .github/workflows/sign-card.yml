@@ -29,7 +29,7 @@ jobs:
             --in cards/ellingson-agent-card.json \
             --out signed-card.json \
             --keyless
-      - name: Verify the signed card (identity-pinned, Rekor required)
+      - name: Verify the signed card (SAN match + Rekor required, non-anchored)
         run: |
           uv run ellingson-card verify \
             --in signed-card.json \
