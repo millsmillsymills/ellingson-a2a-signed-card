@@ -43,7 +43,13 @@ class TrustRoot:
 
     @classmethod
     def from_pem(cls, pem_data: bytes) -> TrustRoot:
-        """Load a trust root from a PEM bundle of one or more CA certificates."""
+        """Load a trust root from a PEM bundle of one or more CA certificates.
+
+        Raises:
+            ValueError: If ``pem_data`` is not a valid PEM bundle of one or more
+                certificates (``load_pem_x509_certificates`` rejects input with
+                no certificate blocks).
+        """
         return cls(tuple(x509.load_pem_x509_certificates(pem_data)))
 
 

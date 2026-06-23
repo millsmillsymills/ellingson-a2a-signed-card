@@ -87,16 +87,120 @@ def test_verify_self_signed_rejected_under_trust_root(tmp_path, capsys):
         ]
     )
     assert rc != 0
+    assert "has no extended key usage" in capsys.readouterr().err
+
+
+def test_verify_wrong_oidc_issuer_rejected(tmp_path, capsys):
+    card, root = _write_anchored(tmp_path)
+    rc = main(
+        [
+            "verify",
+            "--in",
+            str(card),
+            "--identity",
+            IDENTITY,
+            "--no-require-rekor",
+            "--trust-root",
+            str(root),
+            "--oidc-issuer",
+            "https://wrong-issuer.example",
+        ]
+    )
+    assert rc != 0
     assert "UntrustedCertificate" in capsys.readouterr().err
 
 
-def test_trust_root_without_oidc_issuer_errors(tmp_path):
+def test_trust_root_without_oidc_issuer_errors(tmp_path, capsys):
     card, root = _write_anchored(tmp_path)
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as excinfo:
         main(["verify", "--in", str(card), "--identity", IDENTITY, "--trust-root", str(root)])
+    assert excinfo.value.code == 2
+    assert "must be given together" in capsys.readouterr().err
 
 
-def test_oidc_issuer_without_trust_root_errors(tmp_path):
+def test_oidc_issuer_without_trust_root_errors(tmp_path, capsys):
     card, _ = _write_anchored(tmp_path)
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as excinfo:
         main(["verify", "--in", str(card), "--identity", IDENTITY, "--oidc-issuer", OIDC_ISSUER])
+    assert excinfo.value.code == 2
+    assert "must be given together" in capsys.readouterr().err
+
+
+def test_verify_missing_trust_root_file_errors_cleanly(tmp_path, capsys):
+    card, _ = _write_anchored(tmp_path)
+    missing = tmp_path / "absent.pem"
+    rc = main(
+        [
+            "verify",
+            "--in",
+            str(card),
+            "--identity",
+            IDENTITY,
+            "--no-require-rekor",
+            "--trust-root",
+            str(missing),
+            "--oidc-issuer",
+            OIDC_ISSUER,
+        ]
+    )
+    assert rc == 1
+    assert "cannot read trust root" in capsys.readouterr().err
+
+
+def test_verify_malformed_trust_root_pem_errors_cleanly(tmp_path, capsys):
+    card, _ = _write_anchored(tmp_path)
+    junk = tmp_path / "junk.pem"
+    junk.write_text("not a certificate\n")
+    rc = main(
+        [
+            "verify",
+            "--in",
+            str(card),
+            "--identity",
+            IDENTITY,
+            "--no-require-rekor",
+            "--trust-root",
+            str(junk),
+            "--oidc-issuer",
+            OIDC_ISSUER,
+        ]
+    )
+    assert rc == 1
+    assert "invalid trust-root PEM" in capsys.readouterr().err
+
+
+def test_verify_certless_trust_root_bundle_errors_cleanly(tmp_path, capsys):
+    card, _ = _write_anchored(tmp_path)
+    certless = tmp_path / "certless.pem"
+    certless.write_text("# comment only, no certificates\n")
+    rc = main(
+        [
+            "verify",
+            "--in",
+            str(card),
+            "--identity",
+            IDENTITY,
+            "--no-require-rekor",
+            "--trust-root",
+            str(certless),
+            "--oidc-issuer",
+            OIDC_ISSUER,
+        ]
+    )
+    assert rc == 1
+    assert "invalid trust-root PEM" in capsys.readouterr().err
+
+
+def test_verify_malformed_card_json_errors_cleanly(tmp_path, capsys):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json")
+    rc = main(["verify", "--in", str(bad), "--identity", IDENTITY, "--no-require-rekor"])
+    assert rc == 1
+    assert "invalid card JSON" in capsys.readouterr().err
+
+
+def test_verify_missing_card_file_errors_cleanly(tmp_path, capsys):
+    missing = tmp_path / "absent.json"
+    rc = main(["verify", "--in", str(missing), "--identity", IDENTITY, "--no-require-rekor"])
+    assert rc == 1
+    assert "cannot read card" in capsys.readouterr().err
