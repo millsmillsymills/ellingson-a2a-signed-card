@@ -22,8 +22,9 @@ than a tool-specific wrapper. See [docs/delivery-hardening.md](docs/delivery-har
   payload over the RFC 8785 (JCS) canonical card, excluding the `signatures`
   field, per A2A v1.0 §4.4.7. See [SPEC-VERIFIED.md](SPEC-VERIFIED.md).
 - Signs **keyless** in CI: GitHub OIDC → Fulcio short-lived cert (in the JWS
-  `x5c` header) → Rekor transparency-log entry (in a `rekorLogIndex` header
-  field). No long-lived keys exist in the repo or CI:
+  `x5c` header) → Rekor transparency-log entry, with the full Sigstore bundle
+  (cert chain plus the Rekor inclusion proof) carried in a `sigstoreBundle`
+  header field. No long-lived keys exist in the repo or CI:
 
   ```
   $ rg -i "BEGIN.*PRIVATE KEY" .
@@ -67,9 +68,11 @@ verification runs with `--no-require-rekor` while identity pinning stays on.
 The real provenance path runs in [`.github/workflows/sign-card.yml`](.github/workflows/sign-card.yml):
 Sigstore keyless signing produces a Fulcio cert and a Rekor entry, and the card
 is then verified with **Rekor inclusion required** and the workflow identity
-pinned. "Rekor inclusion is checked, not assumed" — the verifier fetches the log
-entry and binds it to the artifact digest and signature it is verifying, so a
-real-but-unrelated log index in the header cannot satisfy the check.
+pinned. "Rekor inclusion is checked, not assumed" — the verifier hands the
+embedded Sigstore bundle to Sigstore's offline verifier, which confirms the
+inclusion proof and signed checkpoint bind to the artifact being verified. Because
+the proof travels in the bundle rather than being re-fetched by index, this stays
+correct across Rekor's v1→v2 migration (Sigstore staging already signs to v2).
 
 To cryptographically anchor trust to a Fulcio root instead of string-matching a
 self-signed cert, pass `verify --trust-root <fulcio-roots.pem> --oidc-issuer
@@ -94,7 +97,8 @@ novel crypto). See [docs/architecture.md](docs/architecture.md).
 | `src/ellingson_card/signer.py` | Emit the spec-native `AgentCardSignature` |
 | `src/ellingson_card/keyless.py` | Sigstore keyless adapter (CI) |
 | `src/ellingson_card/verifier.py` | Fail-closed, identity-pinned verifier |
-| `src/ellingson_card/rekor.py` | Rekor inclusion check |
+| `src/ellingson_card/keyless_verify.py` | Offline Sigstore bundle verification (keyless) |
+| `src/ellingson_card/rekor.py` | Legacy v1 Rekor inclusion check (non-bundle path) |
 | `src/ellingson_card/serve.py` | Serve at the well-known path |
 | `docs/` | Architecture, threat coverage, delivery hardening |
 
