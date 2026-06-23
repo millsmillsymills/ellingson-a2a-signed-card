@@ -54,7 +54,18 @@ def test_sign_malformed_card_errors_cleanly(tmp_path, capsys):
     out = tmp_path / "signed.json"
     rc = main(["sign", "--in", str(bad), "--out", str(out), "--identity", IDENTITY])
     assert rc == 1
-    assert "cannot read card" in capsys.readouterr().err
+    assert "invalid card JSON" in capsys.readouterr().err
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("payload", ["[]", '"x"', "42", "null"])
+def test_sign_non_object_card_errors_cleanly(tmp_path, capsys, payload):
+    bad = tmp_path / "scalar.json"
+    bad.write_text(payload)
+    out = tmp_path / "signed.json"
+    rc = main(["sign", "--in", str(bad), "--out", str(out), "--identity", IDENTITY])
+    assert rc == 1
+    assert "card must be a JSON object" in capsys.readouterr().err
     assert not out.exists()
 
 

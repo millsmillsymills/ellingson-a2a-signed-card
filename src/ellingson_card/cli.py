@@ -12,7 +12,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
-from ellingson_card.card import CardError, load_card
+from ellingson_card.card import CardError, load_card, read_card
 from ellingson_card.errors import VerificationError
 from ellingson_card.keys import generate_signing_material
 from ellingson_card.serve import WELL_KNOWN_PATH, make_server
@@ -46,18 +46,6 @@ class _LoadError(Exception):
     """A pre-verification input could not be read; carries a stderr message."""
 
 
-def _load_card(path: Path) -> dict:
-    try:
-        card = json.loads(path.read_text())
-    except OSError as exc:
-        raise _LoadError(f"cannot read card {path}: {exc}") from exc
-    except json.JSONDecodeError as exc:
-        raise _LoadError(f"invalid card JSON {path}: {exc}") from exc
-    if not isinstance(card, dict):
-        raise _LoadError(f"card must be a JSON object, got {type(card).__name__}")
-    return card
-
-
 def _load_trust_root(path: Path | None) -> TrustRoot | None:
     if path is None:
         return None
@@ -71,9 +59,9 @@ def _load_trust_root(path: Path | None) -> TrustRoot | None:
 
 def _cmd_verify(args: argparse.Namespace) -> int:
     try:
-        card = _load_card(args.in_path)
+        card = read_card(args.in_path)
         trust_root = _load_trust_root(args.trust_root)
-    except _LoadError as exc:
+    except (CardError, _LoadError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     max_age = timedelta(seconds=args.max_age) if args.max_age is not None else None
