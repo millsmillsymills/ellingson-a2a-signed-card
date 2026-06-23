@@ -58,19 +58,22 @@ def verify_chain(
 
     Walks from the leaf upward, at each hop checking the certificate's validity
     window contains ``at_time`` and that the issuer cryptographically signed it.
-    The leaf must carry the code-signing extended key usage. Non-anchor issuers
-    must assert ``BasicConstraints(ca=True)`` and honor their ``pathLenConstraint``
-    against the number of intermediate CAs already below them. Terminates
-    successfully when the current certificate is itself a trusted anchor.
+    The leaf must carry the code-signing extended key usage and a
+    ``KeyUsage`` permitting digital signatures. Non-anchor issuers must assert
+    ``BasicConstraints(ca=True)`` and honor their ``pathLenConstraint`` against
+    the number of intermediate CAs already below them. Terminates successfully
+    when the current certificate is itself a trusted anchor.
 
     Raises:
         UntrustedCertificate: If no path to a trusted anchor exists, a hop is
-            expired, the leaf lacks code-signing EKU, an issuer is not a CA, a
-            ``pathLenConstraint`` is exceeded, or the chain exceeds the depth limit.
+            expired, the leaf lacks code-signing EKU or digital-signature key
+            usage, an issuer is not a CA, a ``pathLenConstraint`` is exceeded,
+            or the chain exceeds the depth limit.
     """
     anchor_fingerprints = {_fingerprint(c) for c in trust_root.anchors}
     pool = [*intermediates, *trust_root.anchors]
     _require_code_signing_eku(leaf)
+    _require_digital_signature(leaf)
     cert = leaf
     intermediate_ca_count = 0
     for _ in range(_MAX_CHAIN_DEPTH):
@@ -190,6 +193,19 @@ def _require_code_signing_eku(cert: x509.Certificate) -> None:
     if ExtendedKeyUsageOID.CODE_SIGNING not in eku:
         raise UntrustedCertificate(
             f"leaf {cert.subject.rfc4514_string()!r} is not a code-signing certificate"
+        )
+
+
+def _require_digital_signature(cert: x509.Certificate) -> None:
+    try:
+        key_usage = cert.extensions.get_extension_for_class(x509.KeyUsage).value
+    except x509.ExtensionNotFound as exc:
+        raise UntrustedCertificate(
+            f"leaf {cert.subject.rfc4514_string()!r} has no key usage"
+        ) from exc
+    if not key_usage.digital_signature:
+        raise UntrustedCertificate(
+            f"leaf {cert.subject.rfc4514_string()!r} key usage does not permit digital signatures"
         )
 
 
