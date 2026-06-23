@@ -277,6 +277,18 @@ def test_ca_issued_cert_verifies_against_trust_root():
     assert result.valid
 
 
+def test_oidc_issuer_absent_rejected():
+    signed, trust_root = _ca_signed(oidc_issuer=None)
+    with pytest.raises(UntrustedCertificate):
+        verify_card(
+            signed,
+            expected_identity=IDENTITY,
+            require_rekor=False,
+            trust_root=trust_root,
+            expected_oidc_issuer=OIDC_ISSUER,
+        )
+
+
 def test_oidc_issuer_mismatch_rejected():
     signed, trust_root = _ca_signed(oidc_issuer="https://evil.example")
     with pytest.raises(UntrustedCertificate):
