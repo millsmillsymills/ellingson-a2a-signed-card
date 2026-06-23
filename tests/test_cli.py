@@ -39,6 +39,25 @@ def test_verify_wrong_identity_exits_nonzero(tmp_path, capsys):
     assert "IdentityMismatch" in capsys.readouterr().err
 
 
+def test_sign_missing_card_file_errors_cleanly(tmp_path, capsys):
+    missing = tmp_path / "absent.json"
+    out = tmp_path / "signed.json"
+    rc = main(["sign", "--in", str(missing), "--out", str(out), "--identity", IDENTITY])
+    assert rc == 1
+    assert "cannot read card" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_sign_malformed_card_errors_cleanly(tmp_path, capsys):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json")
+    out = tmp_path / "signed.json"
+    rc = main(["sign", "--in", str(bad), "--out", str(out), "--identity", IDENTITY])
+    assert rc == 1
+    assert "cannot read card" in capsys.readouterr().err
+    assert not out.exists()
+
+
 def _write_anchored(tmp_path):
     signed, trust_root = _ca_signed()
     card = tmp_path / "anchored.json"
