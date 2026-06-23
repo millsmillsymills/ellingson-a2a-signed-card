@@ -132,7 +132,7 @@ def test_make_rekor_checker_routes_to_base_url(monkeypatch):
     assert captured["base_url"] == "https://rekor.example"
 
 
-def test_make_rekor_checker_returns_true_on_binding_entry(monkeypatch):
+def test_make_rekor_checker_returns_true_when_entry_binds(monkeypatch):
     monkeypatch.setattr(verifier_mod, "fetch_entry_body", lambda *_a, **_k: {"kind": "hr"})
     monkeypatch.setattr(verifier_mod, "entry_binds", lambda *_a, **_k: True)
     checker = verifier_mod.make_rekor_checker("https://rekor.example")
