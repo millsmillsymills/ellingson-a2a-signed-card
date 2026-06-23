@@ -27,8 +27,11 @@ class CardError(ValueError):
     """Raised when an Agent Card is missing required fields or is malformed."""
 
 
-def load_card(path: Path) -> dict[str, Any]:
-    """Load an Agent Card from JSON and validate the fields the pipeline relies on.
+def read_card(path: Path) -> dict[str, Any]:
+    """Read and parse an Agent Card JSON file into a dict.
+
+    The single read/parse entry point shared by the sign and verify paths, so
+    both emit identical, failure-mode-distinguished errors.
 
     Args:
         path: Path to the Agent Card JSON file.
@@ -37,16 +40,34 @@ def load_card(path: Path) -> dict[str, Any]:
         The parsed card as a dict (the served JSON, unmodified).
 
     Raises:
-        CardError: If the file is not valid JSON, a required field is absent, or
-            an interface declares a non-HTTPS endpoint.
+        CardError: If the file cannot be read, is not valid JSON, or does not
+            decode to a JSON object.
     """
     try:
         card = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise CardError(f"cannot read card at {path}: {exc}") from exc
-
+    except OSError as exc:
+        raise CardError(f"cannot read card {path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise CardError(f"invalid card JSON {path}: {exc}") from exc
     if not isinstance(card, dict):
-        raise CardError("card must be a JSON object")
+        raise CardError(f"card must be a JSON object, got {type(card).__name__}")
+    return card
+
+
+def load_card(path: Path) -> dict[str, Any]:
+    """Read an Agent Card and validate the fields the pipeline relies on.
+
+    Args:
+        path: Path to the Agent Card JSON file.
+
+    Returns:
+        The parsed card as a dict (the served JSON, unmodified).
+
+    Raises:
+        CardError: If the card cannot be read, a required field is absent, or
+            an interface declares a non-HTTPS endpoint.
+    """
+    card = read_card(path)
 
     missing = [field for field in _REQUIRED_TOP_LEVEL if not card.get(field)]
     if missing:
