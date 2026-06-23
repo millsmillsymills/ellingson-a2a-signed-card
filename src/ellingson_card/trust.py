@@ -58,7 +58,7 @@ def verify_chain(
 
     Walks from the leaf upward, at each hop checking the certificate's validity
     window contains ``at_time`` and that the issuer cryptographically signed it.
-    The leaf must carry the code-signing extended key usage and a
+    The leaf must carry the code-signing extended key usage and a critical
     ``KeyUsage`` permitting digital signatures. Non-anchor issuers must assert
     ``BasicConstraints(ca=True)`` and honor their ``pathLenConstraint`` against
     the number of intermediate CAs already below them. Terminates successfully
@@ -66,9 +66,10 @@ def verify_chain(
 
     Raises:
         UntrustedCertificate: If no path to a trusted anchor exists, a hop is
-            expired, the leaf lacks code-signing EKU or digital-signature key
-            usage, an issuer is not a CA, a ``pathLenConstraint`` is exceeded,
-            or the chain exceeds the depth limit.
+            expired, the leaf lacks code-signing EKU or a digital-signature key
+            usage, the leaf's ``KeyUsage`` is not marked critical, an issuer is
+            not a CA, a ``pathLenConstraint`` is exceeded, or the chain exceeds
+            the depth limit.
     """
     anchor_fingerprints = {_fingerprint(c) for c in trust_root.anchors}
     pool = [*intermediates, *trust_root.anchors]
