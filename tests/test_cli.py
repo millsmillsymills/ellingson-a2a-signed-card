@@ -204,3 +204,12 @@ def test_verify_missing_card_file_errors_cleanly(tmp_path, capsys):
     rc = main(["verify", "--in", str(missing), "--identity", IDENTITY, "--no-require-rekor"])
     assert rc == 1
     assert "cannot read card" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("payload", ["[]", '"x"', "42", "null"])
+def test_verify_non_object_card_errors_cleanly(tmp_path, capsys, payload):
+    bad = tmp_path / "scalar.json"
+    bad.write_text(payload)
+    rc = main(["verify", "--in", str(bad), "--identity", IDENTITY, "--no-require-rekor"])
+    assert rc == 1
+    assert "card must be a JSON object" in capsys.readouterr().err
