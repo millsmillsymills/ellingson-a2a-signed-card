@@ -44,11 +44,14 @@ class _LoadError(Exception):
 
 def _load_card(path: Path) -> dict:
     try:
-        return json.loads(path.read_text())
+        card = json.loads(path.read_text())
     except OSError as exc:
         raise _LoadError(f"cannot read card {path}: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise _LoadError(f"invalid card JSON {path}: {exc}") from exc
+    if not isinstance(card, dict):
+        raise _LoadError(f"card must be a JSON object, got {type(card).__name__}")
+    return card
 
 
 def _load_trust_root(path: Path | None) -> TrustRoot | None:
