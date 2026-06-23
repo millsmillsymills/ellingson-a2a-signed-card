@@ -166,7 +166,7 @@ def verify_card(
     if not signatures:
         raise MissingSignature("card has no signatures")
     if not isinstance(signatures, list) or not isinstance(signatures[0], dict):
-        raise BadSignature("card signatures must be a non-empty array of objects")
+        raise BadSignature("card signatures must be an array of objects")
     signature = signatures[0]
 
     cert = _load_cert(signature)
