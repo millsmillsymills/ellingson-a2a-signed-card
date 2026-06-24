@@ -54,7 +54,6 @@ class VerifyResult:
 
     identity: str
     rekor_log_index: int | None
-    valid: bool = True
 
 
 def _b64url_decode(value: str) -> bytes:

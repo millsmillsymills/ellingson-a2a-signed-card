@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from hypothesis import given
 from hypothesis import strategies as st
@@ -144,6 +144,25 @@ def test_verify_chain_rejects_self_signed_leaf():
     root_key, root = _ca("root")
     with pytest.raises(UntrustedCertificate):
         verify_chain(self_signed, [], TrustRoot((root,)), at_time=NOW)
+
+
+def test_verify_chain_rejects_non_ec_issuer():
+    rsa_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = _name("rsa-root")
+    rsa_root = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(rsa_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(NOW - timedelta(days=1))
+        .not_valid_after(NOW + timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(rsa_key, hashes.SHA256())
+    )
+    _, leaf = _leaf(rsa_root, rsa_key)
+    with pytest.raises(UntrustedCertificate, match="no trusted issuer"):
+        verify_chain(leaf, [], TrustRoot((rsa_root,)), at_time=NOW)
 
 
 def test_verify_chain_rejects_untrusted_root():
