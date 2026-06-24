@@ -64,8 +64,9 @@ def load_card(path: Path) -> dict[str, Any]:
         The parsed card as a dict (the served JSON, unmodified).
 
     Raises:
-        CardError: If the card cannot be read, a required field is absent, or
-            an interface declares a non-HTTPS endpoint.
+        CardError: If the card cannot be read, a required field is absent, an
+            interface entry is not an object, an interface url is not a string,
+            or an interface declares a non-HTTPS endpoint.
     """
     card = read_card(path)
 
@@ -77,7 +78,11 @@ def load_card(path: Path) -> dict[str, Any]:
     if not isinstance(interfaces, list) or not interfaces:
         raise CardError("supportedInterfaces must be a non-empty array")
     for iface in interfaces:
+        if not isinstance(iface, dict):
+            raise CardError(f"interface entry must be an object, got {type(iface).__name__}")
         url = iface.get("url", "")
+        if not isinstance(url, str):
+            raise CardError(f"interface url must be a string, got {type(url).__name__}")
         if not url.startswith("https://"):
             raise CardError(f"interface endpoint must be HTTPS, got: {url!r}")
 
