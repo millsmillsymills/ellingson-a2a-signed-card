@@ -1,6 +1,6 @@
 """RFC 8785 (JCS) canonicalization of Agent Cards for signing.
 
-The canonical form excludes the ``signatures`` field per A2A v1.0 §10, so a
+The canonical form excludes the ``signatures`` field per A2A v1.0 §4.4.7, so a
 verifier can reconstruct the exact bytes that were signed.
 """
 
