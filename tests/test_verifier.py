@@ -79,6 +79,40 @@ def _ca_signed(identity=IDENTITY, oidc_issuer=OIDC_ISSUER):
     return attach_signature(CARD, sig), TrustRoot((root,))
 
 
+def _self_signed_no_uri_san(extra_extension=None):
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "no-san")])
+    now = datetime.now(UTC)
+    builder = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(days=1))
+    )
+    if extra_extension is not None:
+        builder = builder.add_extension(extra_extension, critical=False)
+    cert = builder.sign(key, hashes.SHA256())
+    sig = sign_card(CARD, key, cert)
+    sig["header"]["x5c"] = cert_to_x5c(cert)
+    return attach_signature(CARD, sig)
+
+
+def test_cert_without_san_extension_fails_closed():
+    signed = _self_signed_no_uri_san()
+    with pytest.raises(IdentityMismatch, match="no URI SAN identity"):
+        verify_card(signed, expected_identity=IDENTITY, require_bundle=False)
+
+
+def test_cert_with_san_but_no_uri_fails_closed():
+    san = x509.SubjectAlternativeName([x509.DNSName("example.com")])
+    signed = _self_signed_no_uri_san(extra_extension=san)
+    with pytest.raises(IdentityMismatch, match="no URI SAN identity"):
+        verify_card(signed, expected_identity=IDENTITY, require_bundle=False)
+
+
 def test_valid_local_card_verifies():
     result = verify_card(_signed(), expected_identity=IDENTITY, require_bundle=False)
     assert result.valid
