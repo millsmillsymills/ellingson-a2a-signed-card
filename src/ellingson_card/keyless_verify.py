@@ -3,9 +3,9 @@
 Keyless-signed cards carry the full Sigstore bundle (Fulcio chain plus the Rekor
 inclusion proof and signed checkpoint) in the ``sigstoreBundle`` header. This
 module hands that bundle to Sigstore's own verifier, which confirms the
-certificate chains to Fulcio, the SAN identity (and optionally OIDC issuer)
-match, and the artifact is included in the Rekor transparency log -- all from the
-bundle's inclusion proof and checkpoint, with no Rekor network lookup.
+certificate chains to Fulcio, the SAN identity and Fulcio OIDC issuer match, and
+the artifact is included in the Rekor transparency log -- all from the bundle's
+inclusion proof and checkpoint, with no Rekor network lookup.
 
 Verifying the proof offline is what makes this robust to Rekor's v1->v2
 migration: Sigstore signs against whichever log its trust config selects (v2 on
@@ -26,8 +26,8 @@ def verify_bundle(
     *,
     expected_identity: str,
     expected_leaf_der: bytes,
+    expected_issuer: str,
     staging: bool = False,
-    expected_issuer: str | None = None,
 ) -> int:
     """Verify a card's Sigstore bundle offline and return its Rekor log index.
 
@@ -39,9 +39,10 @@ def verify_bundle(
         expected_leaf_der: The DER leaf certificate from the card's ``x5c``; the
             bundle's signing certificate must equal it, binding the spec-native
             signature to the bundle being trusted.
+        expected_issuer: The Fulcio OIDC issuer to pin; the bundle's certificate
+            OIDC-issuer extension must equal this value.
         staging: Verify against the Sigstore staging trust root instead of
             production.
-        expected_issuer: If set, also pin the Fulcio OIDC issuer.
 
     Returns:
         The Rekor transparency-log index recorded in the bundle.
@@ -49,7 +50,7 @@ def verify_bundle(
     Raises:
         BundleVerificationError: If the bundle is malformed, its certificate does
             not match the card's ``x5c`` leaf, or Sigstore rejects it (bad chain,
-            identity mismatch, or inclusion proof that does not bind to
+            identity or issuer mismatch, or inclusion proof that does not bind to
             ``message``).
     """
     from cryptography.hazmat.primitives.serialization import Encoding
