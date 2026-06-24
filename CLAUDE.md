@@ -10,4 +10,4 @@ Default triage vocabulary (needs-triage, needs-info, ready-for-agent, ready-for-
 
 ### Domain docs
 
-Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Single-context conventions: domain glossary in `CONTEXT.md` and decision records in `docs/adr/`, both at the repo root. These are created lazily, so they may be absent. See `docs/agents/domain.md`.
