@@ -1,16 +1,15 @@
-import base64
-import logging
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
-import ellingson_card.verifier as verifier_mod
 from ellingson_card.errors import (
     BadSignature,
+    BundleVerificationError,
     CardExpired,
     IdentityMismatch,
     MissingRekorEntry,
@@ -18,7 +17,6 @@ from ellingson_card.errors import (
     UntrustedCertificate,
 )
 from ellingson_card.keys import cert_to_x5c, generate_signing_material
-from ellingson_card.rekor import entry_binds
 from ellingson_card.signer import attach_signature, sign_card
 from ellingson_card.trust import FULCIO_OIDC_ISSUER_OID, TrustRoot
 from ellingson_card.verifier import verify_card
@@ -29,10 +27,9 @@ OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 CARD = {"name": "a", "version": "1", "skills": [{"id": "s"}]}
 
 
-def _signed(identity=IDENTITY, rekor_log_index=None):
+def _signed(identity=IDENTITY):
     key, cert = generate_signing_material(identity)
-    sig = sign_card(CARD, key, cert, rekor_log_index=rekor_log_index)
-    return attach_signature(CARD, sig)
+    return attach_signature(CARD, sign_card(CARD, key, cert))
 
 
 def _ca_root():
@@ -77,17 +74,16 @@ def _ca_signed(identity=IDENTITY, oidc_issuer=OIDC_ISSUER):
             x509.UnrecognizedExtension(FULCIO_OIDC_ISSUER_OID, oidc_issuer.encode()), critical=False
         )
     leaf = builder.sign(root_key, hashes.SHA256())
-    sig = sign_card(CARD, leaf_key, leaf, rekor_log_index=None)
+    sig = sign_card(CARD, leaf_key, leaf)
     sig["header"]["x5c"] = cert_to_x5c(leaf)
     return attach_signature(CARD, sig), TrustRoot((root,))
 
 
-def test_valid_card_verifies():
-    signed = _signed(rekor_log_index=7)
-    result = verify_card(signed, expected_identity=IDENTITY, rekor_checker=lambda *_args: True)
+def test_valid_local_card_verifies():
+    result = verify_card(_signed(), expected_identity=IDENTITY, require_bundle=False)
     assert result.valid
     assert result.identity == IDENTITY
-    assert result.rekor_log_index == 7
+    assert result.rekor_log_index is None
 
 
 def test_missing_signature_fails_closed():
@@ -96,181 +92,61 @@ def test_missing_signature_fails_closed():
 
 
 def test_tampered_payload_fails_closed():
-    signed = _signed(rekor_log_index=7)
+    signed = _signed()
     signed["name"] = "tampered"
     with pytest.raises(BadSignature):
-        verify_card(signed, expected_identity=IDENTITY)
+        verify_card(signed, expected_identity=IDENTITY, require_bundle=False)
 
 
 def test_wrong_identity_fails_pinning():
-    signed = _signed(rekor_log_index=7)
     with pytest.raises(IdentityMismatch):
-        verify_card(signed, expected_identity="https://evil.example/workflow.yml@refs/heads/main")
-
-
-def test_missing_rekor_entry_fails_when_required():
-    signed = _signed(rekor_log_index=None)
-    with pytest.raises(MissingRekorEntry):
-        verify_card(signed, expected_identity=IDENTITY, require_rekor=True)
-
-
-def test_rekor_not_required_passes_without_entry():
-    signed = _signed(rekor_log_index=None)
-    assert verify_card(signed, expected_identity=IDENTITY, require_rekor=False).valid
-
-
-def test_make_rekor_checker_routes_to_base_url(monkeypatch):
-    captured = {}
-
-    def fake_fetch(log_index, *, base_url, timeout=10.0):  # noqa: ARG001
-        captured["base_url"] = base_url
-        return None
-
-    monkeypatch.setattr(verifier_mod, "fetch_entry_body", fake_fetch)
-    checker = verifier_mod.make_rekor_checker("https://rekor.example")
-    assert checker(7, "a" * 64, b"\x30\x06") is False
-    assert captured["base_url"] == "https://rekor.example"
-
-
-def test_make_rekor_checker_returns_true_when_entry_binds(monkeypatch):
-    monkeypatch.setattr(verifier_mod, "fetch_entry_body", lambda *_a, **_k: {"kind": "hr"})
-    monkeypatch.setattr(verifier_mod, "entry_binds", lambda *_a, **_k: True)
-    checker = verifier_mod.make_rekor_checker("https://rekor.example")
-    assert checker(7, "a" * 64, b"\x30\x06") is True
-
-
-def test_rekor_checker_rejection_fails_closed():
-    signed = _signed(rekor_log_index=7)
-    with pytest.raises(MissingRekorEntry):
         verify_card(
-            signed,
-            expected_identity=IDENTITY,
-            require_rekor=True,
-            rekor_checker=lambda *_args: False,
+            _signed(),
+            expected_identity="https://evil.example/workflow.yml@refs/heads/main",
+            require_bundle=False,
         )
 
 
-def test_rekor_checker_receives_binding_material():
-    signed = _signed(rekor_log_index=7)
-    captured = {}
-
-    def checker(index, artifact_hex, signature_der):
-        captured.update(index=index, hex=artifact_hex, der=signature_der)
-        return True
-
-    verify_card(signed, expected_identity=IDENTITY, rekor_checker=checker)
-    assert captured["index"] == 7
-    assert len(captured["hex"]) == 64
-    matching_body = {
-        "kind": "hashedrekord",
-        "apiVersion": "0.0.1",
-        "spec": {
-            "data": {"hash": {"algorithm": "sha256", "value": captured["hex"]}},
-            "signature": {"content": base64.b64encode(captured["der"]).decode()},
-        },
-    }
-    assert entry_binds(
-        matching_body, artifact_sha256_hex=captured["hex"], signature_der=captured["der"]
-    )
+def test_bundleless_card_rejected_when_bundle_required():
+    with pytest.raises(MissingRekorEntry, match="no Sigstore bundle"):
+        verify_card(_signed(), expected_identity=IDENTITY)
 
 
-def test_default_checker_rejects_entry_bound_to_other_signature(monkeypatch):
-    signed = _signed(rekor_log_index=7)
-    unbound = {
-        "kind": "hashedrekord",
-        "spec": {
-            "data": {"hash": {"value": "0" * 64}},
-            "signature": {
-                "content": base64.b64encode(b"\x30\x06\x02\x01\x09\x02\x01\x09").decode()
-            },
-        },
-    }
-    monkeypatch.setattr(verifier_mod, "fetch_entry_body", lambda *_a, **_k: unbound)
-    with pytest.raises(MissingRekorEntry):
-        verify_card(signed, expected_identity=IDENTITY)
-
-
-def test_default_checker_rejects_when_entry_absent(monkeypatch):
-    signed = _signed(rekor_log_index=7)
-    monkeypatch.setattr(verifier_mod, "fetch_entry_body", lambda *_a, **_k: None)
-    with pytest.raises(MissingRekorEntry):
-        verify_card(signed, expected_identity=IDENTITY)
-
-
-def test_default_checker_logs_debug_when_entry_absent(monkeypatch, caplog):
-    caplog.set_level(logging.DEBUG, logger=verifier_mod.__name__)
-    monkeypatch.setattr(verifier_mod, "fetch_entry_body", lambda *_a, **_k: None)
-    assert not verifier_mod.default_rekor_checker(7, "a" * 64, b"\x30\x06")
-    records = [r for r in caplog.records if r.name == verifier_mod.__name__]
-    assert any(r.levelno == logging.DEBUG for r in records)
-    assert not any(r.levelno == logging.WARNING for r in records)
-
-
-def test_default_checker_logs_warning_when_entry_does_not_bind(monkeypatch, caplog):
-    caplog.set_level(logging.DEBUG, logger=verifier_mod.__name__)
-    unbound = {
-        "kind": "hashedrekord",
-        "apiVersion": "0.0.1",
-        "spec": {
-            "data": {"hash": {"algorithm": "sha256", "value": "0" * 64}},
-            "signature": {
-                "content": base64.b64encode(b"\x30\x06\x02\x01\x09\x02\x01\x09").decode()
-            },
-        },
-    }
-    monkeypatch.setattr(verifier_mod, "fetch_entry_body", lambda *_a, **_k: unbound)
-    assert not verifier_mod.default_rekor_checker(7, "a" * 64, b"\x30\x44")
-    records = [r for r in caplog.records if r.name == verifier_mod.__name__]
-    assert any(r.levelno == logging.WARNING for r in records)
-
-
-def test_non_int_rekor_index_fails_closed():
-    signed = _signed(rekor_log_index=7)
-    signed["signatures"][0]["header"]["rekorLogIndex"] = "7; DROP"
-    with pytest.raises(MissingRekorEntry):
-        verify_card(signed, expected_identity=IDENTITY, rekor_checker=lambda *_args: True)
-
-
-def test_bool_rekor_index_fails_closed():
-    signed = _signed(rekor_log_index=7)
-    signed["signatures"][0]["header"]["rekorLogIndex"] = True
-    with pytest.raises(MissingRekorEntry):
-        verify_card(signed, expected_identity=IDENTITY, rekor_checker=lambda *_args: True)
+def test_bundleless_card_passes_when_not_required():
+    assert verify_card(_signed(), expected_identity=IDENTITY, require_bundle=False).valid
 
 
 def test_malformed_cert_fails_closed():
-    signed = _signed(rekor_log_index=7)
+    signed = _signed()
     signed["signatures"][0]["header"]["x5c"] = []
     with pytest.raises(BadSignature):
         verify_card(signed, expected_identity=IDENTITY)
 
 
 def test_malformed_signature_field_fails_closed():
-    signed = _signed(rekor_log_index=7)
+    signed = _signed()
     signed["signatures"][0]["signature"] = "!!!not-b64url!!!"
     with pytest.raises(BadSignature):
         verify_card(signed, expected_identity=IDENTITY)
 
 
 def test_expired_card_fails_closed():
-    signed = _signed(rekor_log_index=7)
     with pytest.raises(CardExpired):
         verify_card(
-            signed,
+            _signed(),
             expected_identity=IDENTITY,
-            require_rekor=False,
+            require_bundle=False,
             max_age=timedelta(seconds=0),
         )
 
 
 def test_self_signed_rejected_when_trust_root_configured():
     _, root = _ca_root()
-    signed = _signed()
     with pytest.raises(UntrustedCertificate):
         verify_card(
-            signed,
+            _signed(),
             expected_identity=IDENTITY,
-            require_rekor=False,
+            require_bundle=False,
             trust_root=TrustRoot((root,)),
             expected_oidc_issuer=OIDC_ISSUER,
         )
@@ -282,7 +158,7 @@ def test_trust_root_without_expected_oidc_issuer_is_rejected():
         verify_card(
             signed,
             expected_identity=IDENTITY,
-            require_rekor=False,
+            require_bundle=False,
             trust_root=trust_root,
         )
 
@@ -292,7 +168,7 @@ def test_ca_issued_cert_verifies_against_trust_root():
     result = verify_card(
         signed,
         expected_identity=IDENTITY,
-        require_rekor=False,
+        require_bundle=False,
         trust_root=trust_root,
         expected_oidc_issuer=OIDC_ISSUER,
     )
@@ -305,7 +181,7 @@ def test_oidc_issuer_absent_rejected():
         verify_card(
             signed,
             expected_identity=IDENTITY,
-            require_rekor=False,
+            require_bundle=False,
             trust_root=trust_root,
             expected_oidc_issuer=OIDC_ISSUER,
         )
@@ -317,13 +193,101 @@ def test_oidc_issuer_mismatch_rejected():
         verify_card(
             signed,
             expected_identity=IDENTITY,
-            require_rekor=False,
+            require_bundle=False,
             trust_root=trust_root,
             expected_oidc_issuer=OIDC_ISSUER,
         )
 
 
-def test_local_demo_path_unchanged_without_trust_root():
-    signed = _signed(rekor_log_index=7)
-    result = verify_card(signed, expected_identity=IDENTITY, rekor_checker=lambda *_a: True)
-    assert result.valid
+def _bundle_signed(bundle="{}"):
+    key, cert = generate_signing_material(IDENTITY)
+    sig = sign_card(CARD, key, cert)
+    sig["header"]["sigstoreBundle"] = bundle
+    return attach_signature(CARD, sig), cert
+
+
+def test_bundle_card_routes_to_sigstore_verify(monkeypatch):
+    import ellingson_card.keyless_verify as kv
+
+    signed, cert = _bundle_signed()
+    captured = {}
+
+    def fake_verify_bundle(message, bundle_json, **kwargs):
+        captured.update(message=message, bundle_json=bundle_json, **kwargs)
+        return 4581700
+
+    monkeypatch.setattr(kv, "verify_bundle", fake_verify_bundle)
+    result = verify_card(signed, expected_identity=IDENTITY, staging=True)
+    assert result.rekor_log_index == 4581700
+    assert captured["expected_identity"] == IDENTITY
+    assert captured["staging"] is True
+    assert captured["expected_leaf_der"] == cert.public_bytes(Encoding.DER)
+
+
+def test_bundle_card_verified_even_when_bundle_required(monkeypatch):
+    import ellingson_card.keyless_verify as kv
+
+    signed, _ = _bundle_signed()
+    monkeypatch.setattr(kv, "verify_bundle", lambda *_a, **_k: 1)
+    assert verify_card(signed, expected_identity=IDENTITY, require_bundle=True).valid
+
+
+def test_bundle_card_forwards_expected_issuer(monkeypatch):
+    import ellingson_card.keyless_verify as kv
+
+    signed, _ = _bundle_signed()
+    captured = {}
+
+    def fake_verify_bundle(_message, _bundle_json, **kwargs):
+        captured.update(kwargs)
+        return 1
+
+    monkeypatch.setattr(kv, "verify_bundle", fake_verify_bundle)
+    verify_card(signed, expected_identity=IDENTITY, expected_oidc_issuer=OIDC_ISSUER)
+    assert captured["expected_issuer"] == OIDC_ISSUER
+
+
+def test_bundle_card_freshness_checked_before_sigstore(monkeypatch):
+    import ellingson_card.keyless_verify as kv
+
+    signed, _ = _bundle_signed()
+
+    def explode(*_a, **_k):
+        raise AssertionError("verify_bundle must not run for an expired card")
+
+    monkeypatch.setattr(kv, "verify_bundle", explode)
+    with pytest.raises(CardExpired):
+        verify_card(signed, expected_identity=IDENTITY, max_age=timedelta(seconds=0))
+
+
+def test_bundle_card_propagates_bundle_error(monkeypatch):
+    import ellingson_card.keyless_verify as kv
+
+    signed, _ = _bundle_signed()
+
+    def boom(*_a, **_k):
+        raise BundleVerificationError("inclusion proof does not bind")
+
+    monkeypatch.setattr(kv, "verify_bundle", boom)
+    with pytest.raises(BundleVerificationError):
+        verify_card(signed, expected_identity=IDENTITY)
+
+
+def test_bundle_card_with_non_string_header_fails_closed():
+    signed, _ = _bundle_signed()
+    signed["signatures"][0]["header"]["sigstoreBundle"] = {"not": "a string"}
+    with pytest.raises(BundleVerificationError, match="must be a string"):
+        verify_card(signed, expected_identity=IDENTITY)
+
+
+def test_bundle_card_tampered_payload_fails_before_sigstore():
+    signed, _ = _bundle_signed()
+    signed["name"] = "tampered"
+    with pytest.raises(BadSignature):
+        verify_card(signed, expected_identity=IDENTITY)
+
+
+def test_bundle_card_wrong_identity_fails_before_sigstore():
+    signed, _ = _bundle_signed()
+    with pytest.raises(IdentityMismatch):
+        verify_card(signed, expected_identity="https://evil.example/wf.yml@refs/heads/main")

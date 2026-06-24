@@ -31,5 +31,11 @@ class MissingRekorEntry(VerificationError):
     """No Rekor transparency-log entry is present or it could not be confirmed."""
 
 
+class BundleVerificationError(VerificationError):
+    """The keyless signature's Sigstore bundle failed offline verification: a
+    malformed bundle, a certificate that does not chain to Fulcio, an identity
+    mismatch, or a Rekor inclusion proof that does not bind to this card."""
+
+
 class CardExpired(VerificationError):
     """The signing certificate is expired or older than the allowed max age."""

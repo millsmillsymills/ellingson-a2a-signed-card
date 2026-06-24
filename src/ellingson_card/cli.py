@@ -15,11 +15,10 @@ from pathlib import Path
 from ellingson_card.card import CardError, load_card, read_card
 from ellingson_card.errors import VerificationError
 from ellingson_card.keys import generate_signing_material
-from ellingson_card.rekor import DEFAULT_REKOR_URL, STAGING_REKOR_URL
 from ellingson_card.serve import WELL_KNOWN_PATH, make_server
 from ellingson_card.signer import attach_signature, sign_card
 from ellingson_card.trust import TrustRoot
-from ellingson_card.verifier import make_rekor_checker, verify_card
+from ellingson_card.verifier import verify_card
 
 
 def _cmd_sign(args: argparse.Namespace) -> int:
@@ -66,16 +65,15 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
     max_age = timedelta(seconds=args.max_age) if args.max_age is not None else None
-    rekor_checker = make_rekor_checker(STAGING_REKOR_URL if args.staging else DEFAULT_REKOR_URL)
     try:
         result = verify_card(
             card,
             expected_identity=args.identity,
-            require_rekor=args.require_rekor,
-            rekor_checker=rekor_checker,
+            require_bundle=args.require_bundle,
             max_age=max_age,
             trust_root=trust_root,
             expected_oidc_issuer=args.oidc_issuer,
+            staging=args.staging,
         )
     except VerificationError as exc:
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
@@ -109,13 +107,19 @@ def _build_parser() -> argparse.ArgumentParser:
     verify = sub.add_parser("verify", help="verify a signed agent card")
     verify.add_argument("--in", dest="in_path", type=Path, required=True)
     verify.add_argument("--identity", required=True)
-    verify.add_argument("--no-require-rekor", dest="require_rekor", action="store_false")
+    verify.add_argument(
+        "--no-require-bundle",
+        dest="require_bundle",
+        action="store_false",
+        help="accept a local self-signed card with no Sigstore bundle "
+        "(transparency-log inclusion is then not checked)",
+    )
     verify.add_argument("--max-age", type=int, default=None, help="max signature age in seconds")
     verify.add_argument(
         "--staging",
         action="store_true",
-        help="route Rekor inclusion checks to Sigstore staging; "
-        "for staging-signed cards on the non-anchored path (not for use with --trust-root)",
+        help="verify staging-signed cards against the Sigstore staging trust root "
+        "(bundle path); not for use with --trust-root",
     )
     verify.add_argument(
         "--trust-root",
@@ -128,7 +132,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--oidc-issuer",
         dest="oidc_issuer",
         default=None,
-        help="required with --trust-root: the Fulcio OIDC-issuer extension to pin",
+        help="the Fulcio OIDC issuer to pin; required with --trust-root, "
+        "optional on the keyless bundle path",
     )
     verify.set_defaults(func=_cmd_verify)
 
@@ -143,12 +148,12 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point. Returns a process exit code."""
     parser = _build_parser()
     args = parser.parse_args(argv)
-    if args.command == "verify" and bool(args.trust_root) != bool(args.oidc_issuer):
-        parser.error("--trust-root and --oidc-issuer must be given together")
+    if args.command == "verify" and args.trust_root and not args.oidc_issuer:
+        parser.error("--trust-root requires --oidc-issuer")
     if args.command == "verify" and args.staging and args.trust_root:
         parser.error(
-            "--staging routes only Rekor to staging and does not select a staging "
-            "Fulcio trust anchor; it cannot be combined with --trust-root"
+            "--staging selects the Sigstore staging trust root for the bundle path; "
+            "--trust-root anchors the local self-signed path. They cannot be combined"
         )
     return int(args.func(args))
 

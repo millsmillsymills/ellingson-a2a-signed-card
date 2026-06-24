@@ -17,10 +17,6 @@ from typing import Any
 from ellingson_card.signer import assemble_keyless_signature, protected_b64, signing_input
 
 
-def _rekor_log_index(log_entry: Any) -> int:
-    return int(log_entry._inner.log_index)  # noqa: SLF001 (sigstore exposes index only here)
-
-
 def sign_card_keyless(card: dict[str, Any], *, staging: bool = False) -> dict[str, Any]:
     """Sign a card with Sigstore keyless signing and return an ``AgentCardSignature``.
 
@@ -30,7 +26,8 @@ def sign_card_keyless(card: dict[str, Any], *, staging: bool = False) -> dict[st
 
     Returns:
         A spec-native ``AgentCardSignature`` carrying the Fulcio ``x5c`` chain and
-        the Rekor ``rekorLogIndex``.
+        the full Sigstore bundle (with the Rekor inclusion proof) for offline
+        transparency-log verification.
 
     Raises:
         RuntimeError: If no ambient OIDC credential is available.
@@ -53,9 +50,4 @@ def sign_card_keyless(card: dict[str, Any], *, staging: bool = False) -> dict[st
         bundle = signer.sign_artifact(message)
 
     leaf_der = bundle.signing_certificate.public_bytes(Encoding.DER)
-    return assemble_keyless_signature(
-        protected,
-        bundle.signature,
-        leaf_der,
-        _rekor_log_index(bundle.log_entry),
-    )
+    return assemble_keyless_signature(protected, bundle.signature, leaf_der, bundle.to_json())
