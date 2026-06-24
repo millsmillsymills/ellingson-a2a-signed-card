@@ -1,17 +1,23 @@
 """Fail-closed, identity-pinned Agent Card verifier.
 
 Verification order: signature presence -> JWS signature -> identity pinning ->
-freshness -> Rekor inclusion bound to this signature. Each rejection raises a
+freshness -> Sigstore bundle (transparency-log inclusion). Each rejection raises a
 distinct error subclass. Identity pinning is on by default; an unpinned verifier
 would accept any Sigstore-signed card, which is nearly useless.
+
+A keyless card carries the full Sigstore bundle in its ``sigstoreBundle`` header;
+the verifier hands that to Sigstore's offline verifier, which confirms the Fulcio
+chain, the SAN identity, and Rekor inclusion from the proof and signed checkpoint
+in the bundle -- no log-index REST lookup, so it is correct regardless of which
+Rekor version (v1 or v2) signed the card. A card without a bundle is a local,
+self-signed card; it is accepted only when ``require_bundle`` is off, in which
+case trust rests on identity pinning and optional trust-root anchoring.
 """
 
 from __future__ import annotations
 
 import base64
-import hashlib
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -33,7 +39,6 @@ from ellingson_card.errors import (
     UntrustedCertificate,
 )
 from ellingson_card.keys import identity_from_cert, x5c_to_cert
-from ellingson_card.rekor import DEFAULT_REKOR_URL, entry_binds, fetch_entry_body
 from ellingson_card.signer import signing_input
 from ellingson_card.trust import TrustRoot, oidc_issuer, verify_chain
 
@@ -41,35 +46,6 @@ logger = logging.getLogger(__name__)
 
 _COORD_BYTES = 32
 _DER = Encoding.DER
-
-RekorChecker = Callable[[int, str, bytes], bool]
-
-
-def make_rekor_checker(base_url: str = DEFAULT_REKOR_URL) -> RekorChecker:
-    """Build a Rekor checker bound to a specific Rekor instance.
-
-    The returned predicate confirms a Rekor entry at a log index binds to the
-    artifact digest and DER signature under verification. ``base_url`` selects
-    the instance: production by default, or the Sigstore staging Rekor for cards
-    signed against staging.
-    """
-
-    def checker(log_index: int, artifact_sha256_hex: str, signature_der: bytes) -> bool:
-        body = fetch_entry_body(log_index, base_url=base_url)
-        if body is None:
-            logger.debug("no usable Rekor entry at logIndex=%s (absent or unreachable)", log_index)
-            return False
-        if not entry_binds(
-            body, artifact_sha256_hex=artifact_sha256_hex, signature_der=signature_der
-        ):
-            logger.warning("Rekor entry at logIndex=%s does not bind to this signature", log_index)
-            return False
-        return True
-
-    return checker
-
-
-default_rekor_checker = make_rekor_checker()
 
 
 @dataclass(frozen=True)
@@ -85,10 +61,6 @@ def _b64url_decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
-def _valid_log_index(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
-
-
 def _load_cert(signature: dict[str, Any]) -> x509.Certificate:
     try:
         return x5c_to_cert(signature["header"]["x5c"][0])
@@ -96,9 +68,7 @@ def _load_cert(signature: dict[str, Any]) -> x509.Certificate:
         raise BadSignature(f"malformed signing certificate: {exc}") from exc
 
 
-def _verify_jws(
-    card: dict[str, Any], signature: dict[str, Any], cert: x509.Certificate
-) -> tuple[bytes, bytes]:
+def _verify_jws(card: dict[str, Any], signature: dict[str, Any], cert: x509.Certificate) -> bytes:
     try:
         raw = _b64url_decode(signature["signature"])
         signature_der = encode_dss_signature(
@@ -115,7 +85,7 @@ def _verify_jws(
         public_key.verify(signature_der, message, ec.ECDSA(hashes.SHA256()))
     except InvalidSignature as exc:
         raise BadSignature("signature does not match canonical card") from exc
-    return signature_der, message
+    return message
 
 
 def _check_freshness(cert: x509.Certificate, max_age: timedelta | None) -> None:
@@ -149,8 +119,7 @@ def verify_card(
     card_json: dict[str, Any],
     *,
     expected_identity: str,
-    require_rekor: bool = True,
-    rekor_checker: RekorChecker = default_rekor_checker,
+    require_bundle: bool = True,
     max_age: timedelta | None = None,
     trust_root: TrustRoot | None = None,
     expected_oidc_issuer: str | None = None,
@@ -161,20 +130,19 @@ def verify_card(
     A card carrying a ``sigstoreBundle`` header (a keyless Sigstore signature) is
     verified through Sigstore's offline bundle verifier: the Rekor inclusion proof
     travels in the bundle, so transparency-log inclusion is confirmed without a
-    log-index REST lookup. All other cards take the hermetic, self-signed-friendly
-    path with the supplied ``rekor_checker``.
+    log-index REST lookup. A card without a bundle is a local self-signed card,
+    accepted only when ``require_bundle`` is off.
 
     Args:
         card_json: The served, signed card as a dict.
         expected_identity: The certificate URI SAN identity to pin.
-        require_rekor: If true, a Rekor entry bound to this signature is mandatory
-            (non-bundle path only; bundle cards always verify their inclusion proof).
-        rekor_checker: Predicate confirming a Rekor entry at a log index binds to
-            the artifact digest and DER signature being verified (non-bundle path).
+        require_bundle: If true (the default), a Sigstore bundle is mandatory; a
+            card without one is rejected so transparency-log inclusion is never
+            silently skipped. Turn it off only for local, self-signed cards.
         max_age: If set, reject signatures whose cert is older than this.
-        trust_root: If set, cryptographically anchor trust by chaining the leaf
-            to a trusted Fulcio root; a self-signed cert is then rejected. When
-            absent, the hermetic self-signed-friendly path is kept unchanged.
+        trust_root: If set, cryptographically anchor the local path by chaining
+            the leaf to a trusted Fulcio root; a self-signed cert is then rejected.
+            Ignored on the bundle path, which carries its own Sigstore trust root.
         expected_oidc_issuer: Required whenever ``trust_root`` is set; the Fulcio
             OIDC-issuer extension must equal this value. On the bundle path it is
             optional and, when set, also pins the bundle's OIDC issuer.
@@ -197,7 +165,7 @@ def verify_card(
     signature = signatures[0]
 
     cert = _load_cert(signature)
-    signature_der, message = _verify_jws(card_json, signature, cert)
+    message = _verify_jws(card_json, signature, cert)
 
     identity = identity_from_cert(cert)
     if identity != expected_identity:
@@ -215,31 +183,11 @@ def verify_card(
             staging=staging,
         )
 
-    return _verify_local_card(
-        signature,
-        cert,
-        signature_der,
-        message,
-        identity=identity,
-        require_rekor=require_rekor,
-        rekor_checker=rekor_checker,
-        trust_root=trust_root,
-        expected_oidc_issuer=expected_oidc_issuer,
-    )
+    if require_bundle:
+        raise MissingRekorEntry(
+            "card carries no Sigstore bundle; transparency-log inclusion is required"
+        )
 
-
-def _verify_local_card(
-    signature: dict[str, Any],
-    cert: x509.Certificate,
-    signature_der: bytes,
-    message: bytes,
-    *,
-    identity: str,
-    require_rekor: bool,
-    rekor_checker: RekorChecker,
-    trust_root: TrustRoot | None,
-    expected_oidc_issuer: str | None,
-) -> VerifyResult:
     if trust_root is not None:
         if expected_oidc_issuer is None:
             raise ValueError(
@@ -248,15 +196,7 @@ def _verify_local_card(
             )
         _enforce_trust(signature, cert, trust_root, expected_oidc_issuer)
 
-    rekor_log_index = signature["header"].get("rekorLogIndex")
-    if require_rekor:
-        artifact_hex = hashlib.sha256(message).hexdigest()
-        if not _valid_log_index(rekor_log_index) or not rekor_checker(
-            rekor_log_index, artifact_hex, signature_der
-        ):
-            raise MissingRekorEntry("no Rekor transparency-log entry bound to this signature")
-
-    return VerifyResult(identity=identity, rekor_log_index=rekor_log_index)
+    return VerifyResult(identity=identity, rekor_log_index=None)
 
 
 def _verify_bundle_card(

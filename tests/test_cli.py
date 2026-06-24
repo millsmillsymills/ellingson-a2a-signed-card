@@ -14,7 +14,7 @@ IDENTITY = "https://github.com/ellingson/signed-card/.github/workflows/sign.yml@
 def test_sign_then_verify_roundtrip(tmp_path, capsys):
     out = tmp_path / "signed.json"
     assert main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY]) == 0
-    rc = main(["verify", "--in", str(out), "--identity", IDENTITY, "--no-require-rekor"])
+    rc = main(["verify", "--in", str(out), "--identity", IDENTITY, "--no-require-bundle"])
     assert rc == 0
     assert IDENTITY in capsys.readouterr().out
 
@@ -25,7 +25,7 @@ def test_verify_tampered_exits_nonzero(tmp_path, capsys):
     card = json.loads(out.read_text())
     card["name"] = "tampered"
     out.write_text(json.dumps(card))
-    rc = main(["verify", "--in", str(out), "--identity", IDENTITY, "--no-require-rekor"])
+    rc = main(["verify", "--in", str(out), "--identity", IDENTITY, "--no-require-bundle"])
     assert rc != 0
     assert "BadSignature" in capsys.readouterr().err
 
@@ -34,7 +34,7 @@ def test_verify_wrong_identity_exits_nonzero(tmp_path, capsys):
     out = tmp_path / "signed.json"
     main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
     wrong = "https://evil.example/x@main"
-    rc = main(["verify", "--in", str(out), "--identity", wrong, "--no-require-rekor"])
+    rc = main(["verify", "--in", str(out), "--identity", wrong, "--no-require-bundle"])
     assert rc != 0
     assert "IdentityMismatch" in capsys.readouterr().err
 
@@ -81,46 +81,12 @@ def _write_anchored(tmp_path):
     return card, root
 
 
-def _signed_with_index(tmp_path):
+def test_verify_bundleless_card_requires_bundle_by_default(tmp_path, capsys):
     out = tmp_path / "signed.json"
     main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
-    card = json.loads(out.read_text())
-    card["signatures"][0]["header"]["rekorLogIndex"] = 7
-    out.write_text(json.dumps(card))
-    return out
-
-
-def _spy_rekor_base_url(monkeypatch):
-    from ellingson_card import cli as cli_mod
-
-    captured = {}
-
-    def spy(base_url):
-        captured["base_url"] = base_url
-        return lambda *_args: True
-
-    monkeypatch.setattr(cli_mod, "make_rekor_checker", spy)
-    return captured
-
-
-def test_verify_staging_routes_rekor_to_staging(tmp_path, monkeypatch):
-    from ellingson_card.rekor import STAGING_REKOR_URL
-
-    captured = _spy_rekor_base_url(monkeypatch)
-    out = _signed_with_index(tmp_path)
-    rc = main(["verify", "--in", str(out), "--identity", IDENTITY, "--staging"])
-    assert rc == 0
-    assert captured["base_url"] == STAGING_REKOR_URL
-
-
-def test_verify_without_staging_routes_rekor_to_production(tmp_path, monkeypatch):
-    from ellingson_card.rekor import DEFAULT_REKOR_URL
-
-    captured = _spy_rekor_base_url(monkeypatch)
-    out = _signed_with_index(tmp_path)
     rc = main(["verify", "--in", str(out), "--identity", IDENTITY])
-    assert rc == 0
-    assert captured["base_url"] == DEFAULT_REKOR_URL
+    assert rc != 0
+    assert "MissingRekorEntry" in capsys.readouterr().err
 
 
 def test_verify_staging_with_trust_root_is_rejected(tmp_path, capsys):
@@ -141,7 +107,7 @@ def test_verify_staging_with_trust_root_is_rejected(tmp_path, capsys):
             ]
         )
     assert exc.value.code == 2
-    assert "cannot be combined with --trust-root" in capsys.readouterr().err
+    assert "cannot be combined" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(("flag", "expected"), [(["--staging"], True), ([], False)])
@@ -170,7 +136,7 @@ def test_verify_anchored_against_trust_root(tmp_path, capsys):
             str(card),
             "--identity",
             IDENTITY,
-            "--no-require-rekor",
+            "--no-require-bundle",
             "--trust-root",
             str(root),
             "--oidc-issuer",
@@ -192,7 +158,7 @@ def test_verify_self_signed_rejected_under_trust_root(tmp_path, capsys):
             str(out),
             "--identity",
             IDENTITY,
-            "--no-require-rekor",
+            "--no-require-bundle",
             "--trust-root",
             str(root),
             "--oidc-issuer",
@@ -212,7 +178,7 @@ def test_verify_wrong_oidc_issuer_rejected(tmp_path, capsys):
             str(card),
             "--identity",
             IDENTITY,
-            "--no-require-rekor",
+            "--no-require-bundle",
             "--trust-root",
             str(root),
             "--oidc-issuer",
@@ -240,7 +206,7 @@ def test_oidc_issuer_without_trust_root_is_allowed(tmp_path, capsys):
             str(card),
             "--identity",
             IDENTITY,
-            "--no-require-rekor",
+            "--no-require-bundle",
             "--oidc-issuer",
             OIDC_ISSUER,
         ]
@@ -259,7 +225,7 @@ def test_verify_missing_trust_root_file_errors_cleanly(tmp_path, capsys):
             str(card),
             "--identity",
             IDENTITY,
-            "--no-require-rekor",
+            "--no-require-bundle",
             "--trust-root",
             str(missing),
             "--oidc-issuer",
@@ -281,7 +247,7 @@ def test_verify_malformed_trust_root_pem_errors_cleanly(tmp_path, capsys):
             str(card),
             "--identity",
             IDENTITY,
-            "--no-require-rekor",
+            "--no-require-bundle",
             "--trust-root",
             str(junk),
             "--oidc-issuer",
@@ -303,7 +269,7 @@ def test_verify_certless_trust_root_bundle_errors_cleanly(tmp_path, capsys):
             str(card),
             "--identity",
             IDENTITY,
-            "--no-require-rekor",
+            "--no-require-bundle",
             "--trust-root",
             str(certless),
             "--oidc-issuer",
@@ -317,14 +283,14 @@ def test_verify_certless_trust_root_bundle_errors_cleanly(tmp_path, capsys):
 def test_verify_malformed_card_json_errors_cleanly(tmp_path, capsys):
     bad = tmp_path / "bad.json"
     bad.write_text("{not json")
-    rc = main(["verify", "--in", str(bad), "--identity", IDENTITY, "--no-require-rekor"])
+    rc = main(["verify", "--in", str(bad), "--identity", IDENTITY, "--no-require-bundle"])
     assert rc == 1
     assert "invalid card JSON" in capsys.readouterr().err
 
 
 def test_verify_missing_card_file_errors_cleanly(tmp_path, capsys):
     missing = tmp_path / "absent.json"
-    rc = main(["verify", "--in", str(missing), "--identity", IDENTITY, "--no-require-rekor"])
+    rc = main(["verify", "--in", str(missing), "--identity", IDENTITY, "--no-require-bundle"])
     assert rc == 1
     assert "cannot read card" in capsys.readouterr().err
 
@@ -336,7 +302,7 @@ def test_verify_missing_card_file_errors_cleanly(tmp_path, capsys):
 def test_verify_non_object_card_errors_cleanly(tmp_path, capsys, payload, type_name):
     bad = tmp_path / "scalar.json"
     bad.write_text(payload)
-    rc = main(["verify", "--in", str(bad), "--identity", IDENTITY, "--no-require-rekor"])
+    rc = main(["verify", "--in", str(bad), "--identity", IDENTITY, "--no-require-bundle"])
     assert rc == 1
     assert capsys.readouterr().err.strip() == f"card must be a JSON object, got {type_name}"
 
@@ -353,7 +319,7 @@ def test_verify_non_object_card_errors_cleanly(tmp_path, capsys, payload, type_n
 def test_verify_malformed_signatures_fail_closed(tmp_path, capsys, signatures, error_name):
     bad = tmp_path / "card.json"
     bad.write_text(signatures)
-    rc = main(["verify", "--in", str(bad), "--identity", IDENTITY, "--no-require-rekor"])
+    rc = main(["verify", "--in", str(bad), "--identity", IDENTITY, "--no-require-bundle"])
     err = capsys.readouterr().err
     assert rc == 1
     assert "Traceback" not in err
@@ -373,7 +339,7 @@ def test_sign_and_verify_emit_identical_stderr(tmp_path, capsys, content):
 
     sign_rc = main(["sign", "--in", str(bad), "--out", str(out), "--identity", IDENTITY])
     sign_err = capsys.readouterr().err
-    verify_rc = main(["verify", "--in", str(bad), "--identity", IDENTITY, "--no-require-rekor"])
+    verify_rc = main(["verify", "--in", str(bad), "--identity", IDENTITY, "--no-require-bundle"])
     verify_err = capsys.readouterr().err
 
     assert sign_rc == 1

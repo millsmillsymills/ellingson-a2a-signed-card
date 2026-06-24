@@ -8,11 +8,11 @@ sign:
 	@mkdir -p $(dir $(OUT))
 	uv run ellingson-card sign --in $(CARD) --out $(OUT) --identity "$(IDENTITY)"
 
-# Identity pinning is always on. --no-require-rekor is used for the local
+# Identity pinning is always on. --no-require-bundle is used for the local
 # ephemeral signature, which is not logged to Rekor; the CI keyless card is
 # verified with Rekor inclusion required.
 verify:
-	uv run ellingson-card verify --in $(OUT) --identity "$(IDENTITY)" --no-require-rekor
+	uv run ellingson-card verify --in $(OUT) --identity "$(IDENTITY)" --no-require-bundle
 
 serve:
 	uv run ellingson-card serve --card $(OUT)

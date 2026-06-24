@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hermetic, offline end-to-end demo: sign -> verify -> tamper -> reject.
 # Local signing uses an ephemeral key with no Rekor entry, so verification runs
-# with --no-require-rekor; the CI keyless workflow produces the Rekor-logged card.
+# with --no-require-bundle; the CI keyless workflow produces the Rekor-logged card.
 set -euo pipefail
 
 IDENTITY="https://ellingson-security.example/local-dev"
@@ -14,11 +14,11 @@ echo "== sign =="
 uv run ellingson-card sign --in "$CARD" --out "$OUT" --identity "$IDENTITY"
 
 echo "== verify (valid card) =="
-uv run ellingson-card verify --in "$OUT" --identity "$IDENTITY" --no-require-rekor
+uv run ellingson-card verify --in "$OUT" --identity "$IDENTITY" --no-require-bundle
 
 echo "== tamper one field and re-verify (must be rejected) =="
 python3 -c "import json,sys; p=sys.argv[1]; d=json.load(open(p)); d['name']='tampered'; json.dump(d, open(p,'w'))" "$OUT"
-if uv run ellingson-card verify --in "$OUT" --identity "$IDENTITY" --no-require-rekor; then
+if uv run ellingson-card verify --in "$OUT" --identity "$IDENTITY" --no-require-bundle; then
   echo "ERROR: tampered card verified — control failed" >&2
   exit 1
 fi

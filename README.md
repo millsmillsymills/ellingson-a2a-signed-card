@@ -98,7 +98,6 @@ novel crypto). See [docs/architecture.md](docs/architecture.md).
 | `src/ellingson_card/keyless.py` | Sigstore keyless adapter (CI) |
 | `src/ellingson_card/verifier.py` | Fail-closed, identity-pinned verifier |
 | `src/ellingson_card/keyless_verify.py` | Offline Sigstore bundle verification (keyless) |
-| `src/ellingson_card/rekor.py` | Legacy v1 Rekor inclusion check (non-bundle path) |
 | `src/ellingson_card/serve.py` | Serve at the well-known path |
 | `docs/` | Architecture, threat coverage, delivery hardening |
 

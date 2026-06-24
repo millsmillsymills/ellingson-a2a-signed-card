@@ -22,10 +22,10 @@ def test_signature_shape_is_spec_native():
     assert len(_b64url_decode(sig["signature"])) == 64
 
 
-def test_rekor_log_index_included_only_when_present():
+def test_local_signature_carries_no_transparency_material():
     key, cert = generate_signing_material(IDENTITY)
-    assert "rekorLogIndex" not in sign_card(CARD, key, cert)["header"]
-    assert sign_card(CARD, key, cert, rekor_log_index=42)["header"]["rekorLogIndex"] == 42
+    header = sign_card(CARD, key, cert)["header"]
+    assert set(header) == {"x5c"}
 
 
 def test_attach_signature_sets_signatures_array():
@@ -48,6 +48,5 @@ def test_assemble_keyless_signature_carries_bundle():
     cert_der = cert.public_bytes(serialization.Encoding.DER)
     sig = assemble_keyless_signature(protected, der, cert_der, '{"mediaType": "bundle+json"}')
     assert sig["header"]["sigstoreBundle"] == '{"mediaType": "bundle+json"}'
-    assert "rekorLogIndex" not in sig["header"]
     assert sig["header"]["x5c"] == [base64.b64encode(cert_der).decode("ascii")]
     assert len(_b64url_decode(sig["signature"])) == 64

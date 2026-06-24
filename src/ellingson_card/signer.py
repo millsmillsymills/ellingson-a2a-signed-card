@@ -3,8 +3,9 @@
 The signature uses a detached payload: the JWS payload is the RFC 8785 JCS
 canonical form of the card (signatures excluded), never embedded in the card.
 The Sigstore/Fulcio certificate chain travels in the unprotected ``x5c`` header;
-Rekor transparency-log linkage travels in a custom ``rekorLogIndex`` header field
-(the spec's JWS shape has no native slot for it).
+for keyless signatures the full Sigstore bundle (with the Rekor inclusion proof)
+travels in a custom ``sigstoreBundle`` header field, since the spec's JWS shape
+has no native slot for transparency-log material.
 """
 
 from __future__ import annotations
@@ -49,7 +50,6 @@ def sign_card(
     card: dict[str, Any],
     key: ec.EllipticCurvePrivateKey,
     cert: x509.Certificate,
-    rekor_log_index: int | None = None,
 ) -> dict[str, Any]:
     """Sign a card and return a spec-native ``AgentCardSignature`` dict.
 
@@ -57,20 +57,16 @@ def sign_card(
         card: The Agent Card to sign (served JSON; ``signatures`` is excluded).
         key: The ES256 private key.
         cert: The signing certificate (self-signed locally, Fulcio in CI).
-        rekor_log_index: Optional Rekor transparency-log index to bind.
 
     Returns:
         ``{"protected", "signature", "header"}`` per A2A v1.0 §4.4.7.
     """
     protected = protected_b64()
     der = key.sign(signing_input(card, protected), ec.ECDSA(hashes.SHA256()))
-    header: dict[str, Any] = {"x5c": cert_to_x5c(cert)}
-    if rekor_log_index is not None:
-        header["rekorLogIndex"] = rekor_log_index
     return {
         "protected": protected,
         "signature": _b64url(_der_to_raw(der)),
-        "header": header,
+        "header": {"x5c": cert_to_x5c(cert)},
     }
 
 
