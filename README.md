@@ -33,7 +33,8 @@ than a tool-specific wrapper. See [docs/delivery-hardening.md](docs/delivery-har
 
 - Verifies **fail-closed with identity pinning on by default**. Each failure has
   a distinct error: `MissingSignature`, `BadSignature`, `IdentityMismatch`,
-  `MissingRekorEntry`, `CardExpired`.
+  `UntrustedCertificate`, `MissingRekorEntry`, `BundleVerificationError`,
+  `CardExpired`.
 - Serves the card at the v1.0 well-known path `/.well-known/agent-card.json` with
   HSTS and `X-Content-Type-Options: nosniff`.
 
@@ -53,6 +54,7 @@ make lint
 signed card written to <tmp>/signed-card.json (ephemeral key, identity: …/local-dev)
 == verify (valid card) ==
 OK: signature valid; pinned identity https://ellingson-security.example/local-dev
+    rekor log index: None
 == tamper one field and re-verify (must be rejected) ==
 BadSignature: signature does not match canonical card
 tampered card correctly rejected
