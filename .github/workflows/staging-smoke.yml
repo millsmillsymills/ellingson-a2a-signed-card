@@ -34,5 +34,6 @@ jobs:
             --in signed-card.json \
             --staging \
             --identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/staging-smoke.yml@${GITHUB_REF}" \
+            --oidc-issuer https://token.actions.githubusercontent.com \
             | tee verify-output.txt
           grep -Eq 'rekor log index: [0-9]+' verify-output.txt
