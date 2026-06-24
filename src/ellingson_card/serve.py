@@ -1,9 +1,10 @@
 """Serve a signed Agent Card locally at the v1.0 well-known path.
 
-Per decision D-B2 the card is served locally; the DNSSEC/CT delivery-channel
-attestation is documented and diagrammed against the real pattern rather than
-live-served. Security headers (HSTS, nosniff) mirror the documented production
-posture. Uses the stdlib HTTP server — no web framework dependency.
+The card is served locally; the DNSSEC/CT delivery-channel attestation is
+documented and diagrammed against the real pattern rather than live-served.
+See ``docs/delivery-hardening.md`` (serving model) for the rationale.
+Security headers (HSTS, nosniff) mirror the documented production posture.
+Uses the stdlib HTTP server — no web framework dependency.
 """
 
 from __future__ import annotations
