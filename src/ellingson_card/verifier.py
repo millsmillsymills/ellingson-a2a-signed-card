@@ -88,6 +88,13 @@ def _verify_jws(card: dict[str, Any], signature: dict[str, Any], cert: x509.Cert
     return message
 
 
+def _pinned_identity(cert: x509.Certificate) -> str:
+    try:
+        return identity_from_cert(cert)
+    except (x509.ExtensionNotFound, ValueError) as exc:
+        raise IdentityMismatch(f"signing certificate has no URI SAN identity: {exc}") from exc
+
+
 def _check_freshness(cert: x509.Certificate, max_age: timedelta | None) -> None:
     now = datetime.now(UTC)
     if now > cert.not_valid_after_utc:
@@ -167,7 +174,7 @@ def verify_card(
     cert = _load_cert(signature)
     message = _verify_jws(card_json, signature, cert)
 
-    identity = identity_from_cert(cert)
+    identity = _pinned_identity(cert)
     if identity != expected_identity:
         raise IdentityMismatch(f"expected identity {expected_identity!r}, got {identity!r}")
 
