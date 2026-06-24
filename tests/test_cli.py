@@ -5,7 +5,7 @@ import pytest
 from cryptography.hazmat.primitives.serialization import Encoding
 
 from ellingson_card.cli import main
-from tests.test_verifier import OIDC_ISSUER, _ca_signed
+from tests.test_verifier import OIDC_ISSUER, _ca_signed, _self_signed_no_uri_san
 
 CARD_PATH = Path(__file__).parent.parent / "cards" / "ellingson-agent-card.json"
 IDENTITY = "https://github.com/ellingson/signed-card/.github/workflows/sign.yml@refs/heads/main"
@@ -48,6 +48,16 @@ def test_verify_wrong_identity_exits_nonzero(tmp_path, capsys):
     rc = main(["verify", "--in", str(out), "--identity", wrong, "--no-require-bundle"])
     assert rc != 0
     assert "IdentityMismatch" in capsys.readouterr().err
+
+
+def test_verify_cert_without_uri_san_fails_closed(tmp_path, capsys):
+    out = tmp_path / "nosan.json"
+    out.write_text(json.dumps(_self_signed_no_uri_san()))
+    rc = main(["verify", "--in", str(out), "--identity", IDENTITY, "--no-require-bundle"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "Traceback" not in err
+    assert err.startswith("IdentityMismatch: ")
 
 
 def test_sign_missing_card_file_errors_cleanly(tmp_path, capsys):
