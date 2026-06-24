@@ -67,10 +67,13 @@ verification runs with `--no-require-bundle` while identity pinning stays on.
 
 The real provenance path runs in [`.github/workflows/sign-card.yml`](.github/workflows/sign-card.yml):
 Sigstore keyless signing produces a Fulcio cert and a Rekor entry, and the card
-is then verified with **Rekor inclusion required** and the workflow identity
-pinned. "Rekor inclusion is checked, not assumed" — the verifier hands the
-embedded Sigstore bundle to Sigstore's offline verifier, which confirms the
-inclusion proof and signed checkpoint bind to the artifact being verified. Because
+is then verified with **Rekor inclusion required**, the workflow identity
+pinned, and the Fulcio OIDC issuer pinned with `--oidc-issuer` (required when
+verifying a bundle card, so an unexpected OIDC provider Fulcio trusts cannot mint
+a cert for the same identity). "Rekor inclusion is checked, not assumed" — the
+verifier hands the embedded Sigstore bundle to Sigstore's offline verifier, which
+confirms the inclusion proof and signed checkpoint bind to the artifact being
+verified. Because
 the proof travels in the bundle rather than being re-fetched by index, this stays
 correct across Rekor's v1→v2 migration (Sigstore staging already signs to v2).
 
