@@ -50,9 +50,9 @@ jobs:
           enable-cache: true
       # actionlint is sourced as a checksum-pinned upstream GitHub release
       # binary (no first-party PyPI package), so Dependabot's uv ecosystem
-      # cannot track it. Bump manually each quarter (or when a CVE is
-      # reported against actionlint): update ACTIONLINT_VERSION and replace
-      # ACTIONLINT_SHA256 with the matching linux_amd64 checksum from the
+      # cannot track it. Bump manually each quarter: update
+      # ACTIONLINT_VERSION and replace ACTIONLINT_SHA256 with the
+      # matching linux_amd64 checksum from the
       # release's SHASUMS file. The two must always change together.
       - name: Run actionlint
         env:
