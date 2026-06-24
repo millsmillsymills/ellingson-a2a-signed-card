@@ -52,6 +52,26 @@ def test_read_card_non_object_message(tmp_path, payload):
         read_card(bad)
 
 
+def test_load_rejects_non_object_interface_entry(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text(
+        '{"name":"x","description":"d","version":"1","skills":[{"id":"s"}],'
+        '"securitySchemes":{"o":{}},"supportedInterfaces":["s"]}'
+    )
+    with pytest.raises(CardError, match="interface entry must be an object"):
+        load_card(bad)
+
+
+def test_load_rejects_non_string_interface_url(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text(
+        '{"name":"x","description":"d","version":"1","skills":[{"id":"s"}],'
+        '"securitySchemes":{"o":{}},"supportedInterfaces":[{"url":123}]}'
+    )
+    with pytest.raises(CardError, match="interface url must be a string"):
+        load_card(bad)
+
+
 def test_load_rejects_plaintext_interface(tmp_path):
     bad = tmp_path / "bad.json"
     bad.write_text(
