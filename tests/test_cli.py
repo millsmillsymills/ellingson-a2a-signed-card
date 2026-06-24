@@ -30,6 +30,17 @@ def test_verify_tampered_exits_nonzero(tmp_path, capsys):
     assert "BadSignature" in capsys.readouterr().err
 
 
+def test_verify_bundle_card_without_oidc_issuer_errors_cleanly(tmp_path, capsys):
+    out = tmp_path / "signed.json"
+    main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
+    card = json.loads(out.read_text())
+    card["signatures"][0]["header"]["sigstoreBundle"] = "{}"
+    out.write_text(json.dumps(card))
+    rc = main(["verify", "--in", str(out), "--identity", IDENTITY])
+    assert rc == 1
+    assert "expected_oidc_issuer is required" in capsys.readouterr().err
+
+
 def test_verify_wrong_identity_exits_nonzero(tmp_path, capsys):
     out = tmp_path / "signed.json"
     main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])

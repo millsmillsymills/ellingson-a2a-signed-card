@@ -14,6 +14,7 @@ from ellingson_card.keyless_verify import verify_bundle
 LEAF_DER = b"\x30\x82leaf-der"
 OTHER_DER = b"\x30\x82other-der"
 IDENTITY = "https://github.com/ellingson/signed-card/.github/workflows/sign.yml@refs/heads/main"
+ISSUER = "https://token.actions.githubusercontent.com"
 MESSAGE = b"eyJhbGciOiJFUzI1NiJ9.payload"
 
 
@@ -70,7 +71,13 @@ def _install(monkeypatch, *, bundle=None, from_json=None, verify=None, record=No
 
 def test_returns_log_index_on_success(monkeypatch):
     _install(monkeypatch)
-    index = verify_bundle(MESSAGE, "{}", expected_identity=IDENTITY, expected_leaf_der=LEAF_DER)
+    index = verify_bundle(
+        MESSAGE,
+        "{}",
+        expected_identity=IDENTITY,
+        expected_leaf_der=LEAF_DER,
+        expected_issuer=ISSUER,
+    )
     assert index == 4581700
 
 
@@ -82,7 +89,13 @@ def test_rejects_cert_not_matching_x5c_leaf(monkeypatch):
         verify=lambda: calls.__setitem__("verify_artifact", 1),
     )
     with pytest.raises(BundleVerificationError, match="x5c leaf"):
-        verify_bundle(MESSAGE, "{}", expected_identity=IDENTITY, expected_leaf_der=LEAF_DER)
+        verify_bundle(
+            MESSAGE,
+            "{}",
+            expected_identity=IDENTITY,
+            expected_leaf_der=LEAF_DER,
+            expected_issuer=ISSUER,
+        )
     assert calls["verify_artifact"] == 0
 
 
@@ -94,7 +107,13 @@ def test_wraps_sigstore_verification_error(monkeypatch):
 
     _install(monkeypatch, verify=boom)
     with pytest.raises(BundleVerificationError, match="inclusion proof"):
-        verify_bundle(MESSAGE, "{}", expected_identity=IDENTITY, expected_leaf_der=LEAF_DER)
+        verify_bundle(
+            MESSAGE,
+            "{}",
+            expected_identity=IDENTITY,
+            expected_leaf_der=LEAF_DER,
+            expected_issuer=ISSUER,
+        )
 
 
 def test_malformed_bundle_fails_closed(monkeypatch):
@@ -103,14 +122,25 @@ def test_malformed_bundle_fails_closed(monkeypatch):
 
     _install(monkeypatch, from_json=bad_from_json)
     with pytest.raises(BundleVerificationError, match="malformed"):
-        verify_bundle(MESSAGE, "garbage", expected_identity=IDENTITY, expected_leaf_der=LEAF_DER)
+        verify_bundle(
+            MESSAGE,
+            "garbage",
+            expected_identity=IDENTITY,
+            expected_leaf_der=LEAF_DER,
+            expected_issuer=ISSUER,
+        )
 
 
 def test_staging_selects_staging_trust_root(monkeypatch):
     record = {}
     _install(monkeypatch, record=record)
     verify_bundle(
-        MESSAGE, "{}", expected_identity=IDENTITY, expected_leaf_der=LEAF_DER, staging=True
+        MESSAGE,
+        "{}",
+        expected_identity=IDENTITY,
+        expected_leaf_der=LEAF_DER,
+        expected_issuer=ISSUER,
+        staging=True,
     )
     assert record["instance"] == "staging"
     assert record["offline"] is True
@@ -120,7 +150,13 @@ def test_staging_selects_staging_trust_root(monkeypatch):
 def test_production_is_default(monkeypatch):
     record = {}
     _install(monkeypatch, record=record)
-    verify_bundle(MESSAGE, "{}", expected_identity=IDENTITY, expected_leaf_der=LEAF_DER)
+    verify_bundle(
+        MESSAGE,
+        "{}",
+        expected_identity=IDENTITY,
+        expected_leaf_der=LEAF_DER,
+        expected_issuer=ISSUER,
+    )
     assert record["instance"] == "production"
 
 
@@ -136,13 +172,6 @@ def test_pins_identity_and_issuer_in_policy(monkeypatch):
     )
     assert record["pinned"]._identity == IDENTITY  # noqa: SLF001 (policy internals)
     assert record["pinned"]._issuer is not None  # noqa: SLF001 (issuer is pinned)
-
-
-def test_issuer_unset_leaves_policy_issuer_none(monkeypatch):
-    record = {}
-    _install(monkeypatch, record=record)
-    verify_bundle(MESSAGE, "{}", expected_identity=IDENTITY, expected_leaf_der=LEAF_DER)
-    assert record["pinned"]._issuer is None  # noqa: SLF001 (no issuer pinned by default)
 
 
 def test_issuer_mismatch_rejected_on_bundle_path(monkeypatch):
@@ -176,4 +205,10 @@ def test_non_numeric_log_index_fails_closed(monkeypatch):
 
     _install(monkeypatch, bundle=_BadBundle())
     with pytest.raises(BundleVerificationError, match="log index"):
-        verify_bundle(MESSAGE, "{}", expected_identity=IDENTITY, expected_leaf_der=LEAF_DER)
+        verify_bundle(
+            MESSAGE,
+            "{}",
+            expected_identity=IDENTITY,
+            expected_leaf_der=LEAF_DER,
+            expected_issuer=ISSUER,
+        )

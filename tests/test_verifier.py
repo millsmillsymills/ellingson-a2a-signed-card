@@ -217,7 +217,9 @@ def test_bundle_card_routes_to_sigstore_verify(monkeypatch):
         return 4581700
 
     monkeypatch.setattr(kv, "verify_bundle", fake_verify_bundle)
-    result = verify_card(signed, expected_identity=IDENTITY, staging=True)
+    result = verify_card(
+        signed, expected_identity=IDENTITY, expected_oidc_issuer=OIDC_ISSUER, staging=True
+    )
     assert result.rekor_log_index == 4581700
     assert captured["expected_identity"] == IDENTITY
     assert captured["staging"] is True
@@ -229,7 +231,15 @@ def test_bundle_card_verified_even_when_bundle_required(monkeypatch):
 
     signed, _ = _bundle_signed()
     monkeypatch.setattr(kv, "verify_bundle", lambda *_a, **_k: 1)
-    assert verify_card(signed, expected_identity=IDENTITY, require_bundle=True).valid
+    assert verify_card(
+        signed, expected_identity=IDENTITY, expected_oidc_issuer=OIDC_ISSUER, require_bundle=True
+    ).valid
+
+
+def test_bundle_card_without_issuer_is_rejected():
+    signed, _ = _bundle_signed()
+    with pytest.raises(ValueError, match="expected_oidc_issuer"):
+        verify_card(signed, expected_identity=IDENTITY)
 
 
 def test_bundle_card_forwards_expected_issuer(monkeypatch):
@@ -270,14 +280,14 @@ def test_bundle_card_propagates_bundle_error(monkeypatch):
 
     monkeypatch.setattr(kv, "verify_bundle", boom)
     with pytest.raises(BundleVerificationError):
-        verify_card(signed, expected_identity=IDENTITY)
+        verify_card(signed, expected_identity=IDENTITY, expected_oidc_issuer=OIDC_ISSUER)
 
 
 def test_bundle_card_with_non_string_header_fails_closed():
     signed, _ = _bundle_signed()
     signed["signatures"][0]["header"]["sigstoreBundle"] = {"not": "a string"}
     with pytest.raises(BundleVerificationError, match="must be a string"):
-        verify_card(signed, expected_identity=IDENTITY)
+        verify_card(signed, expected_identity=IDENTITY, expected_oidc_issuer=OIDC_ISSUER)
 
 
 def test_bundle_card_tampered_payload_fails_before_sigstore():
