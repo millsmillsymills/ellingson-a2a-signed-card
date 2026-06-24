@@ -35,9 +35,8 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
-      - run: uv sync --locked
       - name: Audit locked dependencies for known advisories
-        run: uv run --with pip-audit==2.10.0 pip-audit --skip-editable
+        run: uv run --locked --group audit pip-audit --skip-editable
 
   workflow-lint:
     runs-on: ubuntu-latest
@@ -49,6 +48,12 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
+      # actionlint is sourced as a checksum-pinned upstream GitHub release
+      # binary (no first-party PyPI package), so Dependabot's uv ecosystem
+      # cannot track it. Bump manually each quarter
+      # (or when CI flags a new release): update ACTIONLINT_VERSION and replace
+      # ACTIONLINT_SHA256 with the matching linux_amd64 checksum from the
+      # release's SHASUMS file. The two must always change together.
       - name: Run actionlint
         env:
           ACTIONLINT_VERSION: "1.7.12"
@@ -63,4 +68,4 @@ jobs:
       - name: Run zizmor
         env:
           GH_TOKEN: ${{ github.token }}
-        run: uvx zizmor==1.24.1 .github/workflows/
+        run: uv run --locked --only-group audit zizmor .github/workflows/
