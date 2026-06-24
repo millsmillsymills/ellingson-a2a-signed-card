@@ -63,7 +63,7 @@ tampered card correctly rejected
 The local `make sign`/`make demo` path uses an **ephemeral P-256 key + a
 self-signed cert** carrying the signer identity as a URI SAN — so the demo runs
 offline with no network or secrets. That signature is not in Rekor, so local
-verification runs with `--no-require-rekor` while identity pinning stays on.
+verification runs with `--no-require-bundle` while identity pinning stays on.
 
 The real provenance path runs in [`.github/workflows/sign-card.yml`](.github/workflows/sign-card.yml):
 Sigstore keyless signing produces a Fulcio cert and a Rekor entry, and the card

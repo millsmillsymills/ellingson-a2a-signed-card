@@ -122,3 +122,41 @@ def test_production_is_default(monkeypatch):
     _install(monkeypatch, record=record)
     verify_bundle(MESSAGE, "{}", expected_identity=IDENTITY, expected_leaf_der=LEAF_DER)
     assert record["instance"] == "production"
+
+
+def test_pins_identity_and_issuer_in_policy(monkeypatch):
+    record = {}
+    _install(monkeypatch, record=record)
+    verify_bundle(
+        MESSAGE,
+        "{}",
+        expected_identity=IDENTITY,
+        expected_leaf_der=LEAF_DER,
+        expected_issuer="https://token.actions.githubusercontent.com",
+    )
+    assert record["pinned"]._identity == IDENTITY  # noqa: SLF001 (policy internals)
+    assert record["pinned"]._issuer is not None  # noqa: SLF001 (issuer is pinned)
+
+
+def test_issuer_unset_leaves_policy_issuer_none(monkeypatch):
+    record = {}
+    _install(monkeypatch, record=record)
+    verify_bundle(MESSAGE, "{}", expected_identity=IDENTITY, expected_leaf_der=LEAF_DER)
+    assert record["pinned"]._issuer is None  # noqa: SLF001 (no issuer pinned by default)
+
+
+def test_non_numeric_log_index_fails_closed(monkeypatch):
+    class _BadInner:
+        log_index = "not-a-number"
+
+    class _BadEntry:
+        _inner = _BadInner()
+
+    class _BadBundle:
+        def __init__(self):
+            self.signing_certificate = _FakeCert(LEAF_DER)
+            self.log_entry = _BadEntry()
+
+    _install(monkeypatch, bundle=_BadBundle())
+    with pytest.raises(BundleVerificationError, match="log index"):
+        verify_bundle(MESSAGE, "{}", expected_identity=IDENTITY, expected_leaf_der=LEAF_DER)

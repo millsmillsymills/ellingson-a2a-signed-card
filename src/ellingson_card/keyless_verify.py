@@ -19,8 +19,6 @@ from __future__ import annotations
 
 from ellingson_card.errors import BundleVerificationError
 
-GITHUB_ACTIONS_ISSUER = "https://token.actions.githubusercontent.com"
-
 
 def verify_bundle(
     message: bytes,
@@ -59,19 +57,27 @@ def verify_bundle(
     from sigstore.models import Bundle
     from sigstore.verify import Verifier, policy
 
+    # Parsing and reading fields off an attacker-supplied bundle is a deserialization
+    # boundary: Sigstore/pydantic can raise types beyond ValueError/KeyError/TypeError.
+    # Wrap the whole boundary so any surprise fails closed as BundleVerificationError
+    # rather than escaping as an uncaught traceback past the CLI's error handler.
     try:
         bundle = Bundle.from_json(bundle_json)
-    except (ValueError, KeyError, TypeError) as exc:
+        leaf_matches = bundle.signing_certificate.public_bytes(Encoding.DER) == expected_leaf_der
+        verifier = Verifier.staging(offline=True) if staging else Verifier.production(offline=True)
+        pinned = policy.Identity(identity=expected_identity, issuer=expected_issuer)
+    except Exception as exc:  # noqa: BLE001 -- untrusted-bundle parse boundary, fail closed
         raise BundleVerificationError(f"malformed Sigstore bundle: {exc}") from exc
 
-    if bundle.signing_certificate.public_bytes(Encoding.DER) != expected_leaf_der:
+    if not leaf_matches:
         raise BundleVerificationError("bundle certificate does not match the card's x5c leaf")
 
-    verifier = Verifier.staging(offline=True) if staging else Verifier.production(offline=True)
-    pinned = policy.Identity(identity=expected_identity, issuer=expected_issuer)
     try:
         verifier.verify_artifact(message, bundle, pinned)
     except VerificationError as exc:
         raise BundleVerificationError(str(exc)) from exc
 
-    return int(bundle.log_entry._inner.log_index)  # noqa: SLF001 (index only exposed here)
+    try:
+        return int(bundle.log_entry._inner.log_index)  # noqa: SLF001 (index only exposed here)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise BundleVerificationError(f"bundle has no usable Rekor log index: {exc}") from exc

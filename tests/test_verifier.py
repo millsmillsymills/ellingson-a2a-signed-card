@@ -232,6 +232,34 @@ def test_bundle_card_verified_even_when_bundle_required(monkeypatch):
     assert verify_card(signed, expected_identity=IDENTITY, require_bundle=True).valid
 
 
+def test_bundle_card_forwards_expected_issuer(monkeypatch):
+    import ellingson_card.keyless_verify as kv
+
+    signed, _ = _bundle_signed()
+    captured = {}
+
+    def fake_verify_bundle(_message, _bundle_json, **kwargs):
+        captured.update(kwargs)
+        return 1
+
+    monkeypatch.setattr(kv, "verify_bundle", fake_verify_bundle)
+    verify_card(signed, expected_identity=IDENTITY, expected_oidc_issuer=OIDC_ISSUER)
+    assert captured["expected_issuer"] == OIDC_ISSUER
+
+
+def test_bundle_card_freshness_checked_before_sigstore(monkeypatch):
+    import ellingson_card.keyless_verify as kv
+
+    signed, _ = _bundle_signed()
+
+    def explode(*_a, **_k):
+        raise AssertionError("verify_bundle must not run for an expired card")
+
+    monkeypatch.setattr(kv, "verify_bundle", explode)
+    with pytest.raises(CardExpired):
+        verify_card(signed, expected_identity=IDENTITY, max_age=timedelta(seconds=0))
+
+
 def test_bundle_card_propagates_bundle_error(monkeypatch):
     import ellingson_card.keyless_verify as kv
 
