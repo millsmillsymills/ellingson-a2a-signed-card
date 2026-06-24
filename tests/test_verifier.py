@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
@@ -81,7 +81,6 @@ def _ca_signed(identity=IDENTITY, oidc_issuer=OIDC_ISSUER):
 
 def test_valid_local_card_verifies():
     result = verify_card(_signed(), expected_identity=IDENTITY, require_bundle=False)
-    assert result.valid
     assert result.identity == IDENTITY
     assert result.rekor_log_index is None
 
@@ -113,7 +112,31 @@ def test_bundleless_card_rejected_when_bundle_required():
 
 
 def test_bundleless_card_passes_when_not_required():
-    assert verify_card(_signed(), expected_identity=IDENTITY, require_bundle=False).valid
+    result = verify_card(_signed(), expected_identity=IDENTITY, require_bundle=False)
+    assert result.identity == IDENTITY
+
+
+def test_non_ec_leaf_fails_closed():
+    rsa_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "rsa-leaf")])
+    now = datetime.now(UTC)
+    rsa_cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(rsa_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(
+            x509.SubjectAlternativeName([x509.UniformResourceIdentifier(IDENTITY)]), critical=False
+        )
+        .sign(rsa_key, hashes.SHA256())
+    )
+    signed = _signed()
+    signed["signatures"][0]["header"]["x5c"] = cert_to_x5c(rsa_cert)
+    with pytest.raises(BadSignature, match="not an EC key"):
+        verify_card(signed, expected_identity=IDENTITY, require_bundle=False)
 
 
 def test_malformed_cert_fails_closed():
@@ -172,7 +195,7 @@ def test_ca_issued_cert_verifies_against_trust_root():
         trust_root=trust_root,
         expected_oidc_issuer=OIDC_ISSUER,
     )
-    assert result.valid
+    assert result.identity == IDENTITY
 
 
 def test_oidc_issuer_absent_rejected():
@@ -229,7 +252,8 @@ def test_bundle_card_verified_even_when_bundle_required(monkeypatch):
 
     signed, _ = _bundle_signed()
     monkeypatch.setattr(kv, "verify_bundle", lambda *_a, **_k: 1)
-    assert verify_card(signed, expected_identity=IDENTITY, require_bundle=True).valid
+    result = verify_card(signed, expected_identity=IDENTITY, require_bundle=True)
+    assert result.rekor_log_index == 1
 
 
 def test_bundle_card_forwards_expected_issuer(monkeypatch):
