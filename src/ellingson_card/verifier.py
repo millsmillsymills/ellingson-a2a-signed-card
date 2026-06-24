@@ -87,6 +87,13 @@ def _verify_jws(card: dict[str, Any], signature: dict[str, Any], cert: x509.Cert
     return message
 
 
+def _pinned_identity(cert: x509.Certificate) -> str:
+    try:
+        return identity_from_cert(cert)
+    except (x509.ExtensionNotFound, ValueError) as exc:
+        raise IdentityMismatch(f"signing certificate has no URI SAN identity: {exc}") from exc
+
+
 def _check_freshness(cert: x509.Certificate, max_age: timedelta | None) -> None:
     now = datetime.now(UTC)
     if now > cert.not_valid_after_utc:
@@ -142,16 +149,19 @@ def verify_card(
         trust_root: If set, cryptographically anchor the local path by chaining
             the leaf to a trusted Fulcio root; a self-signed cert is then rejected.
             Ignored on the bundle path, which carries its own Sigstore trust root.
-        expected_oidc_issuer: Required whenever ``trust_root`` is set; the Fulcio
-            OIDC-issuer extension must equal this value. On the bundle path it is
-            optional and, when set, also pins the bundle's OIDC issuer.
+        expected_oidc_issuer: Required on the keyless bundle path and whenever
+            ``trust_root`` is set; the Fulcio OIDC issuer must equal this value.
+            Issuer pinning is the central control on both trusted paths: without
+            it any OIDC provider Fulcio trusts could mint a cert for the same
+            identity and be accepted.
         staging: Verify bundle cards against the Sigstore staging trust root.
 
     Returns:
         A ``VerifyResult`` on success.
 
     Raises:
-        ValueError: If ``trust_root`` is set without ``expected_oidc_issuer``.
+        ValueError: If the card carries a Sigstore bundle, or ``trust_root`` is
+            set, without ``expected_oidc_issuer``.
         MissingSignature, BadSignature, IdentityMismatch, CardExpired,
         UntrustedCertificate, MissingRekorEntry, BundleVerificationError: On the
         corresponding failure.
@@ -166,13 +176,18 @@ def verify_card(
     cert = _load_cert(signature)
     message = _verify_jws(card_json, signature, cert)
 
-    identity = identity_from_cert(cert)
+    identity = _pinned_identity(cert)
     if identity != expected_identity:
         raise IdentityMismatch(f"expected identity {expected_identity!r}, got {identity!r}")
 
     _check_freshness(cert, max_age)
 
     if "sigstoreBundle" in signature["header"]:
+        if expected_oidc_issuer is None:
+            raise ValueError(
+                "expected_oidc_issuer is required on the keyless bundle path: issuer "
+                "pinning is the central control of the trusted path"
+            )
         return _verify_bundle_card(
             signature,
             cert,
@@ -182,6 +197,25 @@ def verify_card(
             staging=staging,
         )
 
+    return _verify_local_card(
+        signature,
+        cert,
+        identity=identity,
+        require_bundle=require_bundle,
+        trust_root=trust_root,
+        expected_oidc_issuer=expected_oidc_issuer,
+    )
+
+
+def _verify_local_card(
+    signature: dict[str, Any],
+    cert: x509.Certificate,
+    *,
+    identity: str,
+    require_bundle: bool,
+    trust_root: TrustRoot | None,
+    expected_oidc_issuer: str | None,
+) -> VerifyResult:
     if require_bundle:
         raise MissingRekorEntry(
             "card carries no Sigstore bundle; transparency-log inclusion is required"
@@ -204,7 +238,7 @@ def _verify_bundle_card(
     message: bytes,
     *,
     identity: str,
-    expected_oidc_issuer: str | None,
+    expected_oidc_issuer: str,
     staging: bool,
 ) -> VerifyResult:
     from ellingson_card.keyless_verify import verify_bundle

@@ -78,6 +78,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     except VerificationError as exc:
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     print(f"OK: signature valid; pinned identity {result.identity}")
     print(f"    rekor log index: {result.rekor_log_index}")
     return 0
@@ -132,8 +135,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--oidc-issuer",
         dest="oidc_issuer",
         default=None,
-        help="the Fulcio OIDC issuer to pin; required with --trust-root, "
-        "optional on the keyless bundle path",
+        help="the Fulcio OIDC issuer to pin; required with --trust-root and "
+        "when verifying a keyless bundle card",
     )
     verify.set_defaults(func=_cmd_verify)
 

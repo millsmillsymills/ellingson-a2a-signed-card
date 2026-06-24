@@ -79,6 +79,40 @@ def _ca_signed(identity=IDENTITY, oidc_issuer=OIDC_ISSUER):
     return attach_signature(CARD, sig), TrustRoot((root,))
 
 
+def _self_signed_no_uri_san(extra_extension=None):
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "no-san")])
+    now = datetime.now(UTC)
+    builder = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(days=1))
+    )
+    if extra_extension is not None:
+        builder = builder.add_extension(extra_extension, critical=False)
+    cert = builder.sign(key, hashes.SHA256())
+    sig = sign_card(CARD, key, cert)
+    sig["header"]["x5c"] = cert_to_x5c(cert)
+    return attach_signature(CARD, sig)
+
+
+def test_cert_without_san_extension_fails_closed():
+    signed = _self_signed_no_uri_san()
+    with pytest.raises(IdentityMismatch, match="no URI SAN identity"):
+        verify_card(signed, expected_identity=IDENTITY, require_bundle=False)
+
+
+def test_cert_with_san_but_no_uri_fails_closed():
+    san = x509.SubjectAlternativeName([x509.DNSName("example.com")])
+    signed = _self_signed_no_uri_san(extra_extension=san)
+    with pytest.raises(IdentityMismatch, match="no URI SAN identity"):
+        verify_card(signed, expected_identity=IDENTITY, require_bundle=False)
+
+
 def test_valid_local_card_verifies():
     result = verify_card(_signed(), expected_identity=IDENTITY, require_bundle=False)
     assert result.identity == IDENTITY
@@ -240,7 +274,9 @@ def test_bundle_card_routes_to_sigstore_verify(monkeypatch):
         return 4581700
 
     monkeypatch.setattr(kv, "verify_bundle", fake_verify_bundle)
-    result = verify_card(signed, expected_identity=IDENTITY, staging=True)
+    result = verify_card(
+        signed, expected_identity=IDENTITY, expected_oidc_issuer=OIDC_ISSUER, staging=True
+    )
     assert result.rekor_log_index == 4581700
     assert captured["expected_identity"] == IDENTITY
     assert captured["staging"] is True
@@ -252,8 +288,16 @@ def test_bundle_card_verified_even_when_bundle_required(monkeypatch):
 
     signed, _ = _bundle_signed()
     monkeypatch.setattr(kv, "verify_bundle", lambda *_a, **_k: 1)
-    result = verify_card(signed, expected_identity=IDENTITY, require_bundle=True)
+    result = verify_card(
+        signed, expected_identity=IDENTITY, expected_oidc_issuer=OIDC_ISSUER, require_bundle=True
+    )
     assert result.rekor_log_index == 1
+
+
+def test_bundle_card_without_issuer_is_rejected():
+    signed, _ = _bundle_signed()
+    with pytest.raises(ValueError, match="expected_oidc_issuer"):
+        verify_card(signed, expected_identity=IDENTITY)
 
 
 def test_bundle_card_forwards_expected_issuer(monkeypatch):
@@ -294,14 +338,14 @@ def test_bundle_card_propagates_bundle_error(monkeypatch):
 
     monkeypatch.setattr(kv, "verify_bundle", boom)
     with pytest.raises(BundleVerificationError):
-        verify_card(signed, expected_identity=IDENTITY)
+        verify_card(signed, expected_identity=IDENTITY, expected_oidc_issuer=OIDC_ISSUER)
 
 
 def test_bundle_card_with_non_string_header_fails_closed():
     signed, _ = _bundle_signed()
     signed["signatures"][0]["header"]["sigstoreBundle"] = {"not": "a string"}
     with pytest.raises(BundleVerificationError, match="must be a string"):
-        verify_card(signed, expected_identity=IDENTITY)
+        verify_card(signed, expected_identity=IDENTITY, expected_oidc_issuer=OIDC_ISSUER)
 
 
 def test_bundle_card_tampered_payload_fails_before_sigstore():

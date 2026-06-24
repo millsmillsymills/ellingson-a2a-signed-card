@@ -33,7 +33,8 @@ than a tool-specific wrapper. See [docs/delivery-hardening.md](docs/delivery-har
 
 - Verifies **fail-closed with identity pinning on by default**. Each failure has
   a distinct error: `MissingSignature`, `BadSignature`, `IdentityMismatch`,
-  `MissingRekorEntry`, `CardExpired`.
+  `UntrustedCertificate`, `MissingRekorEntry`, `BundleVerificationError`,
+  `CardExpired`.
 - Serves the card at the v1.0 well-known path `/.well-known/agent-card.json` with
   HSTS and `X-Content-Type-Options: nosniff`.
 
@@ -53,6 +54,7 @@ make lint
 signed card written to <tmp>/signed-card.json (ephemeral key, identity: …/local-dev)
 == verify (valid card) ==
 OK: signature valid; pinned identity https://ellingson-security.example/local-dev
+    rekor log index: None
 == tamper one field and re-verify (must be rejected) ==
 BadSignature: signature does not match canonical card
 tampered card correctly rejected
@@ -67,10 +69,13 @@ verification runs with `--no-require-bundle` while identity pinning stays on.
 
 The real provenance path runs in [`.github/workflows/sign-card.yml`](.github/workflows/sign-card.yml):
 Sigstore keyless signing produces a Fulcio cert and a Rekor entry, and the card
-is then verified with **Rekor inclusion required** and the workflow identity
-pinned. "Rekor inclusion is checked, not assumed" — the verifier hands the
-embedded Sigstore bundle to Sigstore's offline verifier, which confirms the
-inclusion proof and signed checkpoint bind to the artifact being verified. Because
+is then verified with **Rekor inclusion required**, the workflow identity
+pinned, and the Fulcio OIDC issuer pinned with `--oidc-issuer` (required when
+verifying a bundle card, so an unexpected OIDC provider Fulcio trusts cannot mint
+a cert for the same identity). "Rekor inclusion is checked, not assumed" — the
+verifier hands the embedded Sigstore bundle to Sigstore's offline verifier, which
+confirms the inclusion proof and signed checkpoint bind to the artifact being
+verified. Because
 the proof travels in the bundle rather than being re-fetched by index, this stays
 correct across Rekor's v1→v2 migration (Sigstore staging already signs to v2).
 
