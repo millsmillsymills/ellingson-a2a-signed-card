@@ -145,6 +145,23 @@ def test_issuer_unset_leaves_policy_issuer_none(monkeypatch):
     assert record["pinned"]._issuer is None  # noqa: SLF001 (no issuer pinned by default)
 
 
+def test_issuer_mismatch_rejected_on_bundle_path(monkeypatch):
+    from sigstore.errors import VerificationError
+
+    def boom():
+        raise VerificationError("Certificate's OIDC issuer does not match")
+
+    _install(monkeypatch, verify=boom)
+    with pytest.raises(BundleVerificationError, match="OIDC issuer"):
+        verify_bundle(
+            MESSAGE,
+            "{}",
+            expected_identity=IDENTITY,
+            expected_leaf_der=LEAF_DER,
+            expected_issuer="https://token.actions.githubusercontent.com",
+        )
+
+
 def test_non_numeric_log_index_fails_closed(monkeypatch):
     class _BadInner:
         log_index = "not-a-number"
