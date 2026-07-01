@@ -18,16 +18,16 @@ ellingson-card = "ellingson_card.cli:main"
 dev = [
     "hypothesis==6.155.7",
     "pytest==9.1.1",
-    "ruff==0.15.18",
-    "ty==0.0.51",
+    "ruff==0.15.19",
+    "ty==0.0.53",
 ]
 audit = [
-    "pip-audit==2.10.0",
-    "zizmor==1.24.1",
+    "pip-audit==2.10.1",
+    "zizmor==1.26.1",
 ]
 
 [build-system]
-requires = ["uv_build>=0.11.21,<0.12"]
+requires = ["uv_build>=0.11.24,<0.12"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
