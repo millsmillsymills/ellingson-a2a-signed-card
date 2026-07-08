@@ -1,10 +1,10 @@
 # Threat coverage
 
-Each control here maps back to a threat from the Project A A2A threat model.
+Each control here maps back to a threat from the companion A2A threat-model research.
 Enforcement status notes whether the A2A spec mandates, recommends, or is silent
 on the control — the gap this repo closes by enforcing it.
 
-| Project A threat | Control in this repo | Where | Spec status |
+| A2A threat | Control in this repo | Where | Spec status |
 |------------------|----------------------|-------|-------------|
 | Card spoofing / shadowing (a stranger serves a card claiming to be us) | Identity pinning: the verifier requires the signing cert's URI SAN to equal the expected workflow identity; an unpinned verifier is rejected by default | `verifier.py` (`IdentityMismatch`) | Recommended, not mandated |
 | Forged self-signed cert carrying the right URI SAN | Optional trust anchoring: with a configured `trust_root`, the leaf must chain to a trusted Fulcio root (validity + CA constraints + signature at each hop) and its Fulcio OIDC-issuer extension must match; a self-signed cert is rejected. Absent a trust root, the hermetic self-signed path is kept | `trust.py`, `verifier.py` (`UntrustedCertificate`) | Silent |

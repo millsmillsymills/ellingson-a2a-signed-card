@@ -20,14 +20,14 @@ than a tool-specific wrapper. See [docs/delivery-hardening.md](docs/delivery-har
 
 - Emits a spec-native `AgentCardSignature` — RFC 7515 JWS (ES256) with a detached
   payload over the RFC 8785 (JCS) canonical card, excluding the `signatures`
-  field, per A2A v1.0 §4.4.7. See [SPEC-VERIFIED.md](SPEC-VERIFIED.md).
+  field, per A2A v1.0 §8.4. See [SPEC-VERIFIED.md](SPEC-VERIFIED.md).
 - Signs **keyless** in CI: GitHub OIDC → Fulcio short-lived cert (in the JWS
   `x5c` header) → Rekor transparency-log entry, with the full Sigstore bundle
   (cert chain plus the Rekor inclusion proof) carried in a `sigstoreBundle`
   header field. No long-lived keys exist in the repo or CI:
 
   ```
-  $ rg -i "BEGIN.*PRIVATE KEY" .
+  $ rg -i "BEGIN.*PRIVATE KEY" src/
   # (no matches — signing keys are short-lived and never persisted)
   ```
 

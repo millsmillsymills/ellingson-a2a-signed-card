@@ -7,3 +7,4 @@ dist/
 *.egg-info/
 signed-card.json
 build/
+docs/superpowers/
