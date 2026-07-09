@@ -1,0 +1,39 @@
+name: Keyless Staging Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10 # live Sigstore staging calls can hang; cap well under the 6h default
+    permissions:
+      id-token: write # Sigstore keyless: exchange OIDC for a Fulcio cert
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          python-version: "3.13"
+          enable-cache: false
+      - run: uv sync --locked
+      - name: Keyless-sign against Sigstore staging
+        run: |
+          uv run ellingson-card sign \
+            --in cards/ellingson-agent-card.json \
+            --out signed-card.json \
+            --keyless --staging
+      - name: Verify against staging (SAN match + Rekor required, non-anchored)
+        run: |
+          uv run ellingson-card verify \
+            --in signed-card.json \
+            --staging \
+            --identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/staging-smoke.yml@${GITHUB_REF}" \
+            --oidc-issuer https://token.actions.githubusercontent.com \
+            | tee verify-output.txt
+          grep -Eq 'rekor log index: [0-9]+' verify-output.txt
