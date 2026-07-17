@@ -8,7 +8,7 @@ license = { text = "Apache-2.0" }
 dependencies = [
     "rfc8785==0.1.4",
     "cryptography==48.0.1",
-    "sigstore==4.3.0",
+    "sigstore==4.4.0",
 ]
 
 [project.scripts]
@@ -16,10 +16,10 @@ ellingson-card = "ellingson_card.cli:main"
 
 [dependency-groups]
 dev = [
-    "hypothesis==6.155.7",
+    "hypothesis==6.156.3",
     "pytest==9.1.1",
-    "ruff==0.15.19",
-    "ty==0.0.53",
+    "ruff==0.15.20",
+    "ty==0.0.57",
 ]
 audit = [
     "pip-audit==2.10.1",
@@ -27,7 +27,7 @@ audit = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.11.24,<0.12"]
+requires = ["uv_build>=0.11.28,<0.12"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
