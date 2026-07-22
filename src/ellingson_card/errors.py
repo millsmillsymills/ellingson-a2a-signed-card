@@ -39,3 +39,8 @@ class BundleVerificationError(VerificationError):
 
 class CardExpired(VerificationError):
     """The signing certificate is expired or older than the allowed max age."""
+
+
+class SigningError(Exception):
+    """A keyless signing attempt failed: no ambient OIDC credential, an invalid
+    identity token, or a Sigstore signing/network failure."""
