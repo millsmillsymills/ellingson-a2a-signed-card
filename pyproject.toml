@@ -7,7 +7,7 @@ requires-python = ">=3.13"
 license = { text = "Apache-2.0" }
 dependencies = [
     "rfc8785==0.1.4",
-    "cryptography==48.0.1",
+    "cryptography==49.0.0",
     "sigstore==4.4.0",
 ]
 
@@ -16,10 +16,10 @@ ellingson-card = "ellingson_card.cli:main"
 
 [dependency-groups]
 dev = [
-    "hypothesis==6.156.3",
+    "hypothesis==6.156.6",
     "pytest==9.1.1",
-    "ruff==0.15.20",
-    "ty==0.0.57",
+    "ruff==0.15.21",
+    "ty==0.0.59",
 ]
 audit = [
     "pip-audit==2.10.1",
