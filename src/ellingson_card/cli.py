@@ -41,7 +41,11 @@ def _cmd_sign(args: argparse.Namespace) -> int:
         signature = sign_card(card, key, cert)
         detail = f"ephemeral key, identity: {args.identity}"
     signed = attach_signature(card, signature)
-    args.out_path.write_text(json.dumps(signed, indent=2))
+    try:
+        args.out_path.write_text(json.dumps(signed, indent=2))
+    except OSError as exc:
+        print(f"cannot write signed card {args.out_path}: {exc}", file=sys.stderr)
+        return 1
     print(f"signed card written to {args.out_path} ({detail})")
     return 0
 
