@@ -148,6 +148,36 @@ def test_sign_keyless_forwards_staging(tmp_path, monkeypatch, flag, expected):
     assert captured["staging"] is expected
 
 
+def test_sign_keyless_without_credential_errors_cleanly(tmp_path, capsys, monkeypatch):
+    import sigstore.oidc
+
+    monkeypatch.setattr(sigstore.oidc, "detect_credential", lambda: None)
+    out = tmp_path / "signed.json"
+    rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--keyless"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "Traceback" not in err
+    assert "no ambient OIDC credential; run in a CI job with id-token: write" in err
+    assert not out.exists()
+
+
+def test_sign_keyless_sigstore_failure_errors_cleanly(tmp_path, capsys, monkeypatch):
+    from ellingson_card import keyless as keyless_mod
+    from ellingson_card.errors import SigningError
+
+    def boom(card, *, staging):
+        raise SigningError("Sigstore keyless signing failed: fulcio unreachable")
+
+    monkeypatch.setattr(keyless_mod, "sign_card_keyless", boom)
+    out = tmp_path / "signed.json"
+    rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--keyless"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "Traceback" not in err
+    assert err.strip() == "Sigstore keyless signing failed: fulcio unreachable"
+    assert not out.exists()
+
+
 def test_verify_anchored_against_trust_root(tmp_path, capsys):
     card, root = _write_anchored(tmp_path)
     rc = main(
