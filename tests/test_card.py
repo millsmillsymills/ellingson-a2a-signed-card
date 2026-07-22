@@ -28,8 +28,44 @@ def test_card_for_signing_drops_signatures():
 def test_load_rejects_missing_required_field(tmp_path):
     bad = tmp_path / "bad.json"
     bad.write_text('{"name": "x"}')
-    with pytest.raises(CardError):
+    with pytest.raises(CardError, match="missing required field\\(s\\)") as excinfo:
         load_card(bad)
+    assert "description" in str(excinfo.value)
+    assert "empty" not in str(excinfo.value)
+
+
+def test_load_reports_empty_array_field_as_empty_not_missing(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text(
+        '{"name":"x","description":"d","version":"1","skills":[],'
+        '"securitySchemes":{"o":{}},'
+        '"supportedInterfaces":[{"url":"https://x","protocolVersion":"1.0"}]}'
+    )
+    with pytest.raises(CardError, match="present but empty: skills") as excinfo:
+        load_card(bad)
+    assert "missing" not in str(excinfo.value)
+
+
+def test_load_reports_empty_string_field_as_empty_not_missing(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text(
+        '{"name":"x","description":"","version":"1","skills":[{"id":"s"}],'
+        '"securitySchemes":{"o":{}},'
+        '"supportedInterfaces":[{"url":"https://x","protocolVersion":"1.0"}]}'
+    )
+    with pytest.raises(CardError, match="present but empty: description") as excinfo:
+        load_card(bad)
+    assert "missing" not in str(excinfo.value)
+
+
+def test_load_reports_missing_and_empty_fields_together(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"name": "", "skills": []}')
+    with pytest.raises(CardError) as excinfo:
+        load_card(bad)
+    message = str(excinfo.value)
+    assert "missing required field(s): description, version" in message
+    assert "present but empty: name, skills" in message
 
 
 def test_read_card_missing_file_message(tmp_path):
