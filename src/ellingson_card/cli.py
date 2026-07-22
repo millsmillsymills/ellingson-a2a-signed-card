@@ -91,11 +91,23 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
-    server = make_server(args.card_path, args.port)
+    try:
+        server = make_server(args.card_path, args.port)
+    except CardError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"cannot bind 127.0.0.1:{args.port}: {exc}", file=sys.stderr)
+        return 1
     print(
         f"serving {args.card_path} at http://127.0.0.1:{server.server_address[1]}{WELL_KNOWN_PATH}"
     )
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        return 130
+    finally:
+        server.server_close()
     return 0
 
 

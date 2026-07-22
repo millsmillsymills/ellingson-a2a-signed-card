@@ -12,6 +12,8 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from ellingson_card.card import CardError
+
 WELL_KNOWN_PATH = "/.well-known/agent-card.json"
 
 
@@ -24,8 +26,15 @@ def make_server(card_path: Path, port: int) -> ThreadingHTTPServer:
 
     Returns:
         An unstarted ``ThreadingHTTPServer``; call ``serve_forever`` to run it.
+
+    Raises:
+        CardError: If the card file cannot be read.
+        OSError: If the port cannot be bound.
     """
-    card_bytes = card_path.read_bytes()
+    try:
+        card_bytes = card_path.read_bytes()
+    except OSError as exc:
+        raise CardError(f"cannot read card {card_path}: {exc}") from exc
 
     class _Handler(BaseHTTPRequestHandler):
         def _send_card_headers(self) -> bool:
