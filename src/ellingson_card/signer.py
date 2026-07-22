@@ -36,9 +36,14 @@ def protected_b64() -> str:
     return _b64url(json.dumps({"alg": "ES256"}, separators=(",", ":")).encode())
 
 
+def payload_b64(card: dict[str, Any]) -> str:
+    """Return the base64url-encoded JCS canonical JWS payload of a card."""
+    return _b64url(canonicalize(card))
+
+
 def signing_input(card: dict[str, Any], protected: str) -> bytes:
     """Return the JWS signing input for a card with the given protected header."""
-    return f"{protected}.{_b64url(canonicalize(card))}".encode("ascii")
+    return f"{protected}.{payload_b64(card)}".encode("ascii")
 
 
 def _der_to_raw(der_signature: bytes) -> bytes:
