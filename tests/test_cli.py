@@ -1,5 +1,6 @@
 import json
 import os
+import socket
 from pathlib import Path
 
 import pytest
@@ -105,6 +106,20 @@ def test_sign_out_path_is_directory_errors_cleanly(tmp_path, capsys):
     assert f"cannot write signed card {tmp_path}" in err
 
 
+def test_sign_empty_required_field_errors_cleanly(tmp_path, capsys):
+    bad = tmp_path / "empty-skills.json"
+    bad.write_text(
+        '{"name":"x","description":"d","version":"1","skills":[],'
+        '"securitySchemes":{"o":{}},'
+        '"supportedInterfaces":[{"url":"https://x","protocolVersion":"1.0"}]}'
+    )
+    out = tmp_path / "signed.json"
+    rc = main(["sign", "--in", str(bad), "--out", str(out), "--identity", IDENTITY])
+    assert rc == 1
+    assert "present but empty: skills" in capsys.readouterr().err
+    assert not out.exists()
+
+
 def test_sign_malformed_card_errors_cleanly(tmp_path, capsys):
     bad = tmp_path / "bad.json"
     bad.write_text("{not json")
@@ -127,6 +142,62 @@ def test_sign_non_object_card_errors_cleanly(tmp_path, capsys, payload, type_nam
     assert rc == 1
     assert capsys.readouterr().err.strip() == f"card must be a JSON object, got {type_name}"
     assert not out.exists()
+
+
+def test_serve_missing_card_errors_cleanly(tmp_path, capsys):
+    rc = main(["serve", "--card", str(tmp_path / "absent.json"), "--port", "0"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "Traceback" not in err
+    assert "cannot read card" in err
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="chmod has no effect as root")
+def test_serve_unreadable_card_errors_cleanly(tmp_path, capsys):
+    card = tmp_path / "card.json"
+    card.write_text("{}")
+    card.chmod(0o000)
+    try:
+        rc = main(["serve", "--card", str(card), "--port", "0"])
+    finally:
+        card.chmod(0o644)
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "Traceback" not in err
+    assert "cannot read card" in err
+
+
+def test_serve_taken_port_errors_cleanly(tmp_path, capsys):
+    card = tmp_path / "card.json"
+    card.write_text("{}")
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        port = taken.getsockname()[1]
+        rc = main(["serve", "--card", str(card), "--port", str(port)])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "Traceback" not in err
+    assert f"cannot bind 127.0.0.1:{port}" in err
+
+
+def test_serve_keyboard_interrupt_exits_cleanly(tmp_path, capsys, monkeypatch):
+    from ellingson_card import cli as cli_mod
+
+    class _FakeServer:
+        server_address = ("127.0.0.1", 12345)
+        closed = False
+
+        def serve_forever(self):
+            raise KeyboardInterrupt
+
+        def server_close(self):
+            self.closed = True
+
+    fake = _FakeServer()
+    monkeypatch.setattr(cli_mod, "make_server", lambda path, port: fake)
+    rc = main(["serve", "--card", str(tmp_path / "any.json"), "--port", "0"])
+    assert rc == 130
+    assert fake.closed
 
 
 def _write_anchored(tmp_path):
@@ -182,6 +253,36 @@ def test_sign_keyless_forwards_staging(tmp_path, monkeypatch, flag, expected):
     rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--keyless", *flag])
     assert rc == 0
     assert captured["staging"] is expected
+
+
+def test_sign_keyless_without_credential_errors_cleanly(tmp_path, capsys, monkeypatch):
+    import sigstore.oidc
+
+    monkeypatch.setattr(sigstore.oidc, "detect_credential", lambda: None)
+    out = tmp_path / "signed.json"
+    rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--keyless"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "Traceback" not in err
+    assert "no ambient OIDC credential; run in a CI job with id-token: write" in err
+    assert not out.exists()
+
+
+def test_sign_keyless_sigstore_failure_errors_cleanly(tmp_path, capsys, monkeypatch):
+    from ellingson_card import keyless as keyless_mod
+    from ellingson_card.errors import SigningError
+
+    def boom(card, *, staging):
+        raise SigningError("Sigstore keyless signing failed: fulcio unreachable")
+
+    monkeypatch.setattr(keyless_mod, "sign_card_keyless", boom)
+    out = tmp_path / "signed.json"
+    rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--keyless"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "Traceback" not in err
+    assert err.strip() == "Sigstore keyless signing failed: fulcio unreachable"
+    assert not out.exists()
 
 
 def test_verify_anchored_against_trust_root(tmp_path, capsys):

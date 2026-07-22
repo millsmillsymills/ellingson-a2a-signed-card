@@ -54,6 +54,18 @@ def read_card(path: Path) -> dict[str, Any]:
     return card
 
 
+def _check_required_fields(card: dict[str, Any]) -> None:
+    missing = [field for field in _REQUIRED_TOP_LEVEL if field not in card]
+    empty = [field for field in _REQUIRED_TOP_LEVEL if field in card and not card[field]]
+    problems = []
+    if missing:
+        problems.append(f"card missing required field(s): {', '.join(missing)}")
+    if empty:
+        problems.append(f"card required field(s) present but empty: {', '.join(empty)}")
+    if problems:
+        raise CardError("; ".join(problems))
+
+
 def load_card(path: Path) -> dict[str, Any]:
     """Read an Agent Card and validate the fields the pipeline relies on.
 
@@ -64,15 +76,12 @@ def load_card(path: Path) -> dict[str, Any]:
         The parsed card as a dict (the served JSON, unmodified).
 
     Raises:
-        CardError: If the card cannot be read, a required field is absent, an
-            interface entry is not an object, an interface url is not a string,
-            or an interface declares a non-HTTPS endpoint.
+        CardError: If the card cannot be read, a required field is absent or
+            empty, an interface entry is not an object, an interface url is not
+            a string, or an interface declares a non-HTTPS endpoint.
     """
     card = read_card(path)
-
-    missing = [field for field in _REQUIRED_TOP_LEVEL if not card.get(field)]
-    if missing:
-        raise CardError(f"card missing required field(s): {', '.join(missing)}")
+    _check_required_fields(card)
 
     interfaces = card["supportedInterfaces"]
     if not isinstance(interfaces, list) or not interfaces:

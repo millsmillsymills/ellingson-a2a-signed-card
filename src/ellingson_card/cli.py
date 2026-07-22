@@ -13,7 +13,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from ellingson_card.card import CardError, load_card, read_card
-from ellingson_card.errors import VerificationError
+from ellingson_card.errors import SigningError, VerificationError
 from ellingson_card.keys import generate_signing_material
 from ellingson_card.serve import WELL_KNOWN_PATH, make_server
 from ellingson_card.signer import attach_signature, sign_card
@@ -30,7 +30,11 @@ def _cmd_sign(args: argparse.Namespace) -> int:
     if args.keyless:
         from ellingson_card.keyless import sign_card_keyless
 
-        signature = sign_card_keyless(card, staging=args.staging)
+        try:
+            signature = sign_card_keyless(card, staging=args.staging)
+        except SigningError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
         detail = "keyless (Sigstore)"
     else:
         key, cert = generate_signing_material(args.identity)
@@ -91,11 +95,23 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
-    server = make_server(args.card_path, args.port)
+    try:
+        server = make_server(args.card_path, args.port)
+    except CardError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"cannot bind 127.0.0.1:{args.port}: {exc}", file=sys.stderr)
+        return 1
     print(
         f"serving {args.card_path} at http://127.0.0.1:{server.server_address[1]}{WELL_KNOWN_PATH}"
     )
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        return 130
+    finally:
+        server.server_close()
     return 0
 
 
