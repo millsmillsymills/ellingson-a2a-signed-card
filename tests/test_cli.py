@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -67,6 +68,41 @@ def test_sign_missing_card_file_errors_cleanly(tmp_path, capsys):
     assert rc == 1
     assert "cannot read card" in capsys.readouterr().err
     assert not out.exists()
+
+
+def test_sign_out_path_in_missing_directory_errors_cleanly(tmp_path, capsys):
+    out = tmp_path / "no-such-dir" / "signed.json"
+    rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "Traceback" not in err
+    assert f"cannot write signed card {out}" in err
+    assert not out.exists()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="chmod has no effect as root")
+def test_sign_out_path_in_readonly_directory_errors_cleanly(tmp_path, capsys):
+    readonly = tmp_path / "readonly"
+    readonly.mkdir()
+    readonly.chmod(0o500)
+    out = readonly / "signed.json"
+    try:
+        rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
+    finally:
+        readonly.chmod(0o755)
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "Traceback" not in err
+    assert f"cannot write signed card {out}" in err
+    assert not out.exists()
+
+
+def test_sign_out_path_is_directory_errors_cleanly(tmp_path, capsys):
+    rc = main(["sign", "--in", str(CARD_PATH), "--out", str(tmp_path), "--identity", IDENTITY])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "Traceback" not in err
+    assert f"cannot write signed card {tmp_path}" in err
 
 
 def test_sign_malformed_card_errors_cleanly(tmp_path, capsys):
