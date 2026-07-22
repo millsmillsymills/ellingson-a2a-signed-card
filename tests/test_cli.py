@@ -69,6 +69,20 @@ def test_sign_missing_card_file_errors_cleanly(tmp_path, capsys):
     assert not out.exists()
 
 
+def test_sign_empty_required_field_errors_cleanly(tmp_path, capsys):
+    bad = tmp_path / "empty-skills.json"
+    bad.write_text(
+        '{"name":"x","description":"d","version":"1","skills":[],'
+        '"securitySchemes":{"o":{}},'
+        '"supportedInterfaces":[{"url":"https://x","protocolVersion":"1.0"}]}'
+    )
+    out = tmp_path / "signed.json"
+    rc = main(["sign", "--in", str(bad), "--out", str(out), "--identity", IDENTITY])
+    assert rc == 1
+    assert "present but empty: skills" in capsys.readouterr().err
+    assert not out.exists()
+
+
 def test_sign_malformed_card_errors_cleanly(tmp_path, capsys):
     bad = tmp_path / "bad.json"
     bad.write_text("{not json")
