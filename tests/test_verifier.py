@@ -256,6 +256,43 @@ def test_oidc_issuer_mismatch_rejected():
         )
 
 
+def test_valid_signature_at_index_1_verifies():
+    signed = _signed()
+    garbage = {"protected": "x", "signature": "y", "header": {}}
+    signed["signatures"].insert(0, garbage)
+    result = verify_card(signed, expected_identity=IDENTITY, require_bundle=False)
+    assert result.identity == IDENTITY
+
+
+def test_no_entry_matching_identity_raises_with_tried_count():
+    signed = _signed()
+    other = _signed("https://other.example/wf.yml@refs/heads/main")["signatures"][0]
+    signed["signatures"].append(other)
+    with pytest.raises(IdentityMismatch, match="2 signature entries tried"):
+        verify_card(
+            signed,
+            expected_identity="https://evil.example/wf.yml@refs/heads/main",
+            require_bundle=False,
+        )
+
+
+def test_single_signature_failure_message_has_no_tried_count():
+    with pytest.raises(IdentityMismatch) as excinfo:
+        verify_card(
+            _signed(),
+            expected_identity="https://evil.example/wf.yml@refs/heads/main",
+            require_bundle=False,
+        )
+    assert "entries tried" not in str(excinfo.value)
+
+
+def test_non_object_entry_at_any_position_fails_closed():
+    signed = _signed()
+    signed["signatures"].append("garbage")
+    with pytest.raises(BadSignature, match="array of objects"):
+        verify_card(signed, expected_identity=IDENTITY, require_bundle=False)
+
+
 def _bundle_signed(bundle="{}"):
     key, cert = generate_signing_material(IDENTITY)
     sig = sign_card(CARD, key, cert)
@@ -346,6 +383,17 @@ def test_bundle_card_with_non_string_header_fails_closed():
     signed["signatures"][0]["header"]["sigstoreBundle"] = {"not": "a string"}
     with pytest.raises(BundleVerificationError, match="must be a string"):
         verify_card(signed, expected_identity=IDENTITY, expected_oidc_issuer=OIDC_ISSUER)
+
+
+def test_bundle_entry_after_bundleless_verifies_when_bundle_required(monkeypatch):
+    import ellingson_card.keyless_verify as kv
+
+    monkeypatch.setattr(kv, "verify_bundle", lambda *_a, **_k: 7)
+    bundleless = _signed()["signatures"][0]
+    bundled, _ = _bundle_signed()
+    bundled["signatures"].insert(0, bundleless)
+    result = verify_card(bundled, expected_identity=IDENTITY, expected_oidc_issuer=OIDC_ISSUER)
+    assert result.rekor_log_index == 7
 
 
 def test_bundle_card_tampered_payload_fails_before_sigstore():

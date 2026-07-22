@@ -37,6 +37,7 @@ from ellingson_card.errors import (
     MissingRekorEntry,
     MissingSignature,
     UntrustedCertificate,
+    VerificationError,
 )
 from ellingson_card.keys import identity_from_cert, x5c_to_cert
 from ellingson_card.signer import signing_input
@@ -139,6 +140,11 @@ def verify_card(
     log-index REST lookup. A card without a bundle is a local self-signed card,
     accepted only when ``require_bundle`` is off.
 
+    Each ``signatures`` entry is tried in order against the full check sequence;
+    the first entry that passes yields the result. If none passes, the first
+    entry's error is raised, with the tried-count appended when the card carries
+    more than one signature.
+
     Args:
         card_json: The served, signed card as a dict.
         expected_identity: The certificate URI SAN identity to pin.
@@ -169,10 +175,44 @@ def verify_card(
     signatures = card_json.get("signatures")
     if not signatures:
         raise MissingSignature("card has no signatures")
-    if not isinstance(signatures, list) or not isinstance(signatures[0], dict):
+    if not isinstance(signatures, list) or not all(isinstance(entry, dict) for entry in signatures):
         raise BadSignature("card signatures must be an array of objects")
-    signature = signatures[0]
 
+    first_error: VerificationError | None = None
+    for signature in signatures:
+        try:
+            return _verify_entry(
+                card_json,
+                signature,
+                expected_identity=expected_identity,
+                require_bundle=require_bundle,
+                max_age=max_age,
+                trust_root=trust_root,
+                expected_oidc_issuer=expected_oidc_issuer,
+                staging=staging,
+            )
+        except VerificationError as exc:
+            if first_error is None:
+                first_error = exc
+    assert first_error is not None  # noqa: S101 (signatures is non-empty, so the loop ran)
+    if len(signatures) == 1:
+        raise first_error
+    raise type(first_error)(
+        f"{first_error} (no entry passed verification; {len(signatures)} signature entries tried)"
+    ) from first_error
+
+
+def _verify_entry(
+    card_json: dict[str, Any],
+    signature: dict[str, Any],
+    *,
+    expected_identity: str,
+    require_bundle: bool,
+    max_age: timedelta | None,
+    trust_root: TrustRoot | None,
+    expected_oidc_issuer: str | None,
+    staging: bool,
+) -> VerifyResult:
     cert = _load_cert(signature)
     message = _verify_jws(card_json, signature, cert)
 
