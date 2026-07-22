@@ -58,6 +58,18 @@ def test_load_reports_empty_string_field_as_empty_not_missing(tmp_path):
     assert "missing" not in str(excinfo.value)
 
 
+def test_load_reports_whitespace_only_string_field_as_empty(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text(
+        '{"name":"x","description":"   \\t\\n","version":"1","skills":[{"id":"s"}],'
+        '"securitySchemes":{"o":{}},'
+        '"supportedInterfaces":[{"url":"https://x","protocolVersion":"1.0"}]}'
+    )
+    with pytest.raises(CardError, match="present but empty: description") as excinfo:
+        load_card(bad)
+    assert "missing" not in str(excinfo.value)
+
+
 def test_load_reports_missing_and_empty_fields_together(tmp_path):
     bad = tmp_path / "bad.json"
     bad.write_text('{"name": "", "skills": []}')
