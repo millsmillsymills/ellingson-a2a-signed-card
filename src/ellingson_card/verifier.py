@@ -40,13 +40,14 @@ from ellingson_card.errors import (
     VerificationError,
 )
 from ellingson_card.keys import identity_from_cert, x5c_to_cert
-from ellingson_card.signer import signing_input
+from ellingson_card.signer import payload_b64
 from ellingson_card.trust import TrustRoot, oidc_issuer, verify_chain
 
 logger = logging.getLogger(__name__)
 
 _COORD_BYTES = 32
 _DER = Encoding.DER
+_MAX_SIGNATURE_ENTRIES = 16
 
 
 @dataclass(frozen=True)
@@ -68,14 +69,14 @@ def _load_cert(signature: dict[str, Any]) -> x509.Certificate:
         raise BadSignature(f"malformed signing certificate: {exc}") from exc
 
 
-def _verify_jws(card: dict[str, Any], signature: dict[str, Any], cert: x509.Certificate) -> bytes:
+def _verify_jws(payload: str, signature: dict[str, Any], cert: x509.Certificate) -> bytes:
     try:
         raw = _b64url_decode(signature["signature"])
         signature_der = encode_dss_signature(
             int.from_bytes(raw[:_COORD_BYTES], "big"),
             int.from_bytes(raw[_COORD_BYTES:], "big"),
         )
-        message = signing_input(card, signature["protected"])
+        message = f"{signature['protected']}.{payload}".encode("ascii")
     except (KeyError, IndexError, ValueError, TypeError) as exc:
         raise BadSignature(f"malformed signature: {exc}") from exc
     public_key = cert.public_key()
@@ -143,7 +144,8 @@ def verify_card(
     Each ``signatures`` entry is tried in order against the full check sequence;
     the first entry that passes yields the result. If none passes, the first
     entry's error is raised, with the tried-count appended when the card carries
-    more than one signature.
+    more than one signature. Arrays longer than 16 entries are rejected outright
+    so an attacker-supplied card cannot force unbounded per-entry crypto work.
 
     Args:
         card_json: The served, signed card as a dict.
@@ -177,12 +179,17 @@ def verify_card(
         raise MissingSignature("card has no signatures")
     if not isinstance(signatures, list) or not all(isinstance(entry, dict) for entry in signatures):
         raise BadSignature("card signatures must be an array of objects")
+    if len(signatures) > _MAX_SIGNATURE_ENTRIES:
+        raise BadSignature(
+            f"too many signature entries: {len(signatures)} (max {_MAX_SIGNATURE_ENTRIES})"
+        )
 
+    payload = payload_b64(card_json)
     first_error: VerificationError | None = None
     for signature in signatures:
         try:
             return _verify_entry(
-                card_json,
+                payload,
                 signature,
                 expected_identity=expected_identity,
                 require_bundle=require_bundle,
@@ -203,7 +210,7 @@ def verify_card(
 
 
 def _verify_entry(
-    card_json: dict[str, Any],
+    payload: str,
     signature: dict[str, Any],
     *,
     expected_identity: str,
@@ -214,7 +221,7 @@ def _verify_entry(
     staging: bool,
 ) -> VerifyResult:
     cert = _load_cert(signature)
-    message = _verify_jws(card_json, signature, cert)
+    message = _verify_jws(payload, signature, cert)
 
     identity = _pinned_identity(cert)
     if identity != expected_identity:

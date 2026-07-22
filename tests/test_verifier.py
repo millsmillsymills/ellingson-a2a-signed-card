@@ -286,6 +286,14 @@ def test_single_signature_failure_message_has_no_tried_count():
     assert "entries tried" not in str(excinfo.value)
 
 
+def test_oversized_signatures_array_fails_closed():
+    signed = _signed()
+    filler = {"protected": "x", "signature": "y", "header": {}}
+    signed["signatures"] = [dict(filler) for _ in range(17)]
+    with pytest.raises(BadSignature, match="too many signature entries"):
+        verify_card(signed, expected_identity=IDENTITY, require_bundle=False)
+
+
 def test_non_object_entry_at_any_position_fails_closed():
     signed = _signed()
     signed["signatures"].append("garbage")
