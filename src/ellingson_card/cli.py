@@ -11,6 +11,7 @@ import json
 import os
 import signal
 import sys
+import tempfile
 from datetime import timedelta
 from pathlib import Path
 
@@ -44,13 +45,21 @@ def _cmd_sign(args: argparse.Namespace) -> int:
         detail = f"ephemeral key, identity: {args.identity}"
     signed = attach_signature(card, signature)
     # Write-then-rename so a mid-write failure (e.g. disk full) never leaves a
-    # truncated card at --out.
-    tmp_out = Path(f"{args.out_path}.tmp")
+    # truncated card at --out. mkstemp gives the temp file a unique name so
+    # concurrent sign runs cannot clobber each other and a pre-existing
+    # `<out>.tmp` is never destroyed.
+    tmp_out: Path | None = None
     try:
+        fd, tmp_name = tempfile.mkstemp(
+            dir=args.out_path.parent, prefix=args.out_path.name, suffix=".tmp"
+        )
+        os.close(fd)
+        tmp_out = Path(tmp_name)
         tmp_out.write_text(json.dumps(signed, indent=2))
-        os.replace(tmp_out, args.out_path)
+        tmp_out.replace(args.out_path)
     except OSError as exc:
-        tmp_out.unlink(missing_ok=True)
+        if tmp_out is not None:
+            tmp_out.unlink(missing_ok=True)
         print(f"cannot write signed card {args.out_path}: {exc}", file=sys.stderr)
         return 1
     print(f"signed card written to {args.out_path} ({detail})")

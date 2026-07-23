@@ -135,6 +135,26 @@ def test_sign_success_leaves_only_the_signed_card(tmp_path):
     assert list(tmp_path.iterdir()) == [out]
 
 
+def test_sign_over_existing_target_replaces_content(tmp_path):
+    out = tmp_path / "signed.json"
+    out.write_text("stale signed card")
+    rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
+    assert rc == 0
+    signed = json.loads(out.read_text())
+    assert signed["signatures"]
+    assert list(tmp_path.iterdir()) == [out]
+
+
+def test_sign_does_not_clobber_unrelated_tmp_file(tmp_path):
+    out = tmp_path / "signed.json"
+    bystander = tmp_path / "signed.json.tmp"
+    bystander.write_text("unrelated file")
+    rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
+    assert rc == 0
+    assert bystander.read_text() == "unrelated file"
+    assert sorted(tmp_path.iterdir()) == [out, bystander]
+
+
 def test_sign_empty_required_field_errors_cleanly(tmp_path, capsys):
     bad = tmp_path / "empty-skills.json"
     bad.write_text(
