@@ -70,6 +70,29 @@ def test_load_reports_whitespace_only_string_field_as_empty(tmp_path):
     assert "missing" not in str(excinfo.value)
 
 
+def test_load_reports_nbsp_only_string_field_as_empty(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text(
+        '{"name":"x","description":"\\u00a0","version":"1","skills":[{"id":"s"}],'
+        '"securitySchemes":{"o":{}},'
+        '"supportedInterfaces":[{"url":"https://x","protocolVersion":"1.0"}]}'
+    )
+    with pytest.raises(CardError, match="present but empty: description"):
+        load_card(bad)
+
+
+def test_load_accepts_zwsp_only_string_field(tmp_path):
+    # Zero-width characters are intentionally not treated as whitespace (#117);
+    # this pins str.strip() semantics against a reimplementation of the check.
+    card = tmp_path / "card.json"
+    card.write_text(
+        '{"name":"x","description":"\\u200b","version":"1","skills":[{"id":"s"}],'
+        '"securitySchemes":{"o":{}},'
+        '"supportedInterfaces":[{"url":"https://x","protocolVersion":"1.0"}]}'
+    )
+    assert load_card(card)["description"] == "\u200b"
+
+
 def test_load_reports_missing_and_empty_fields_together(tmp_path):
     bad = tmp_path / "bad.json"
     bad.write_text('{"name": "", "skills": []}')
