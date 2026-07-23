@@ -1,6 +1,9 @@
 import json
 import os
+import signal
 import socket
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -224,6 +227,47 @@ def test_serve_keyboard_interrupt_exits_cleanly(tmp_path, capsys, monkeypatch):
     rc = main(["serve", "--card", str(tmp_path / "any.json"), "--port", "0"])
     assert rc == 130
     assert fake.closed
+
+
+def test_serve_sigterm_exits_cleanly(tmp_path, monkeypatch):
+    from ellingson_card import cli as cli_mod
+
+    class _FakeServer:
+        server_address = ("127.0.0.1", 12345)
+        closed = False
+
+        def serve_forever(self):
+            os.kill(os.getpid(), signal.SIGTERM)
+
+        def server_close(self):
+            self.closed = True
+
+    fake = _FakeServer()
+    monkeypatch.setattr(cli_mod, "make_server", lambda path, port: fake)
+    previous_handler = signal.getsignal(signal.SIGTERM)
+    rc = main(["serve", "--card", str(tmp_path / "any.json"), "--port", "0"])
+    assert rc == 143
+    assert fake.closed
+    assert signal.getsignal(signal.SIGTERM) is previous_handler
+
+
+def test_serve_sigterm_subprocess_exits_143(tmp_path):
+    card = tmp_path / "card.json"
+    card.write_text("{}")
+    argv = [sys.executable, "-u", "-m", "ellingson_card.cli", "serve", "--card", str(card)]
+    proc = subprocess.Popen(
+        [*argv, "--port", "0"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert proc.stdout is not None
+        assert proc.stdout.readline().startswith("serving ")
+        proc.send_signal(signal.SIGTERM)
+        assert proc.wait(timeout=10) == 143
+    finally:
+        proc.kill()
 
 
 def _write_anchored(tmp_path):

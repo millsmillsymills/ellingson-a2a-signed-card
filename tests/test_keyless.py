@@ -1,5 +1,6 @@
 import pytest
 import sigstore.oidc
+import sigstore.sign
 
 import ellingson_card.keyless as keyless
 from ellingson_card.errors import SigningError
@@ -23,4 +24,17 @@ def test_keyless_wraps_credential_detection_failure(monkeypatch):
 def test_keyless_wraps_invalid_token(monkeypatch):
     monkeypatch.setattr(sigstore.oidc, "detect_credential", lambda: "not-a-jwt")
     with pytest.raises(SigningError, match="invalid ambient OIDC token"):
+        keyless.sign_card_keyless({"name": "a"})
+
+
+def test_keyless_wraps_sigstore_signing_failure(monkeypatch):
+    monkeypatch.setattr(sigstore.oidc, "detect_credential", lambda: "header.payload.sig")
+    monkeypatch.setattr(sigstore.oidc, "IdentityToken", lambda raw: object())
+    monkeypatch.setattr(sigstore.sign.ClientTrustConfig, "production", lambda: object())
+
+    def boom(trust):
+        raise ConnectionError("fulcio unreachable")
+
+    monkeypatch.setattr(sigstore.sign.SigningContext, "from_trust_config", boom)
+    with pytest.raises(SigningError, match="Sigstore keyless signing failed"):
         keyless.sign_card_keyless({"name": "a"})

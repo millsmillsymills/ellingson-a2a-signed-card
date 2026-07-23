@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import sys
 from datetime import timedelta
 from pathlib import Path
@@ -100,6 +101,14 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     return 0
 
 
+class _Terminated(Exception):
+    """SIGTERM was received while serving; maps to the conventional exit 143."""
+
+
+def _raise_terminated(signum: int, frame: object) -> None:
+    raise _Terminated
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     try:
         server = make_server(args.card_path, args.port)
@@ -109,15 +118,20 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     except OSError as exc:
         print(f"cannot bind 127.0.0.1:{args.port}: {exc}", file=sys.stderr)
         return 1
-    print(
-        f"serving {args.card_path} at http://127.0.0.1:{server.server_address[1]}{WELL_KNOWN_PATH}"
-    )
+    previous_sigterm = signal.signal(signal.SIGTERM, _raise_terminated)
     try:
+        print(
+            f"serving {args.card_path} at "
+            f"http://127.0.0.1:{server.server_address[1]}{WELL_KNOWN_PATH}"
+        )
         server.serve_forever()
     except KeyboardInterrupt:
         return 130
+    except _Terminated:
+        return 143
     finally:
         server.server_close()
+        signal.signal(signal.SIGTERM, previous_sigterm)
     return 0
 
 
