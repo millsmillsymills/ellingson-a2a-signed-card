@@ -7,6 +7,7 @@ stderr, so the shell sees exactly which fail-closed control rejected the card.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import signal
@@ -44,28 +45,31 @@ def _cmd_sign(args: argparse.Namespace) -> int:
         signature = sign_card(card, key, cert)
         detail = f"ephemeral key, identity: {args.identity}"
     signed = attach_signature(card, signature)
+    payload = json.dumps(signed, indent=2)
     # Write-then-rename so a mid-write failure (e.g. disk full) never leaves a
     # truncated card at --out. mkstemp gives the temp file a unique name so
     # concurrent sign runs cannot clobber each other and a pre-existing
-    # `<out>.tmp` is never destroyed.
+    # `<out>.tmp` is never destroyed. fchmod and the write go through the open
+    # fd so the file at the temp path is never reopened by name.
     tmp_out: Path | None = None
     try:
         fd, tmp_name = tempfile.mkstemp(
             dir=args.out_path.parent, prefix=args.out_path.name, suffix=".tmp"
         )
+        tmp_out = Path(tmp_name)
         # mkstemp forces 0600; a signed card is public served content, so restore
         # the umask-derived permissions a normal create would have produced.
         umask = os.umask(0)
         os.umask(umask)
-        os.fchmod(fd, 0o666 & ~umask)
-        os.close(fd)
-        tmp_out = Path(tmp_name)
-        tmp_out.write_text(json.dumps(signed, indent=2))
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            os.fchmod(fd, 0o666 & ~umask)
+            handle.write(payload)
         tmp_out.replace(args.out_path)
     except OSError as exc:
-        if tmp_out is not None:
-            tmp_out.unlink(missing_ok=True)
         print(f"cannot write signed card {args.out_path}: {exc}", file=sys.stderr)
+        if tmp_out is not None:
+            with contextlib.suppress(OSError):
+                tmp_out.unlink()
         return 1
     print(f"signed card written to {args.out_path} ({detail})")
     return 0
