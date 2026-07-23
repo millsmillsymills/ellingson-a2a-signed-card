@@ -27,14 +27,19 @@ def test_keyless_wraps_invalid_token(monkeypatch):
         keyless.sign_card_keyless({"name": "a"})
 
 
-def test_keyless_wraps_sigstore_signing_failure(monkeypatch):
+@pytest.mark.parametrize("staging", [False, True])
+def test_keyless_wraps_sigstore_signing_failure(monkeypatch, staging):
     monkeypatch.setattr(sigstore.oidc, "detect_credential", lambda: "header.payload.sig")
     monkeypatch.setattr(sigstore.oidc, "IdentityToken", lambda raw: object())
     monkeypatch.setattr(sigstore.sign.ClientTrustConfig, "production", lambda: object())
+    monkeypatch.setattr(sigstore.sign.ClientTrustConfig, "staging", lambda: object())
+
+    original = ConnectionError("fulcio unreachable")
 
     def boom(trust):
-        raise ConnectionError("fulcio unreachable")
+        raise original
 
     monkeypatch.setattr(sigstore.sign.SigningContext, "from_trust_config", boom)
-    with pytest.raises(SigningError, match="Sigstore keyless signing failed"):
-        keyless.sign_card_keyless({"name": "a"})
+    with pytest.raises(SigningError, match="Sigstore keyless signing failed") as exc_info:
+        keyless.sign_card_keyless({"name": "a"}, staging=staging)
+    assert exc_info.value.__cause__ is original
