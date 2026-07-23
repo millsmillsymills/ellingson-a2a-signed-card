@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import signal
 import sys
 from datetime import timedelta
@@ -42,9 +43,14 @@ def _cmd_sign(args: argparse.Namespace) -> int:
         signature = sign_card(card, key, cert)
         detail = f"ephemeral key, identity: {args.identity}"
     signed = attach_signature(card, signature)
+    # Write-then-rename so a mid-write failure (e.g. disk full) never leaves a
+    # truncated card at --out.
+    tmp_out = Path(f"{args.out_path}.tmp")
     try:
-        args.out_path.write_text(json.dumps(signed, indent=2))
+        tmp_out.write_text(json.dumps(signed, indent=2))
+        os.replace(tmp_out, args.out_path)
     except OSError as exc:
+        tmp_out.unlink(missing_ok=True)
         print(f"cannot write signed card {args.out_path}: {exc}", file=sys.stderr)
         return 1
     print(f"signed card written to {args.out_path} ({detail})")

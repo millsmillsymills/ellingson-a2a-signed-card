@@ -109,6 +109,32 @@ def test_sign_out_path_is_directory_errors_cleanly(tmp_path, capsys):
     assert f"cannot write signed card {tmp_path}" in err
 
 
+def test_sign_write_failure_mid_write_leaves_target_untouched(tmp_path, capsys, monkeypatch):
+    out = tmp_path / "signed.json"
+    out.write_text("previous signed card")
+
+    def partial_write_then_enospc(self, text, *args, **kwargs):
+        with self.open("w") as fh:
+            fh.write(text[:10])
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Path, "write_text", partial_write_then_enospc)
+    rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "Traceback" not in err
+    assert f"cannot write signed card {out}" in err
+    assert out.read_text() == "previous signed card"
+    assert list(tmp_path.iterdir()) == [out]
+
+
+def test_sign_success_leaves_only_the_signed_card(tmp_path):
+    out = tmp_path / "signed.json"
+    rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
+    assert rc == 0
+    assert list(tmp_path.iterdir()) == [out]
+
+
 def test_sign_empty_required_field_errors_cleanly(tmp_path, capsys):
     bad = tmp_path / "empty-skills.json"
     bad.write_text(
