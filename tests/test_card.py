@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -5,6 +6,21 @@ import pytest
 from ellingson_card.card import CardError, card_for_signing, load_card, read_card
 
 CARD_PATH = Path(__file__).parent.parent / "cards" / "ellingson-agent-card.json"
+
+
+def _write_card(tmp_path, **overrides):
+    card = {
+        "name": "x",
+        "description": "d",
+        "version": "1",
+        "skills": [{"id": "s"}],
+        "securitySchemes": {"o": {}},
+        "supportedInterfaces": [{"url": "https://x", "protocolVersion": "1.0"}],
+    }
+    card.update(overrides)
+    path = tmp_path / "card.json"
+    path.write_text(json.dumps(card))
+    return path
 
 
 def test_canonical_card_loads_and_is_v1():
@@ -35,61 +51,36 @@ def test_load_rejects_missing_required_field(tmp_path):
 
 
 def test_load_reports_empty_array_field_as_empty_not_missing(tmp_path):
-    bad = tmp_path / "bad.json"
-    bad.write_text(
-        '{"name":"x","description":"d","version":"1","skills":[],'
-        '"securitySchemes":{"o":{}},'
-        '"supportedInterfaces":[{"url":"https://x","protocolVersion":"1.0"}]}'
-    )
+    bad = _write_card(tmp_path, skills=[])
     with pytest.raises(CardError, match="present but empty: skills") as excinfo:
         load_card(bad)
     assert "missing" not in str(excinfo.value)
 
 
 def test_load_reports_empty_string_field_as_empty_not_missing(tmp_path):
-    bad = tmp_path / "bad.json"
-    bad.write_text(
-        '{"name":"x","description":"","version":"1","skills":[{"id":"s"}],'
-        '"securitySchemes":{"o":{}},'
-        '"supportedInterfaces":[{"url":"https://x","protocolVersion":"1.0"}]}'
-    )
+    bad = _write_card(tmp_path, description="")
     with pytest.raises(CardError, match="present but empty: description") as excinfo:
         load_card(bad)
     assert "missing" not in str(excinfo.value)
 
 
 def test_load_reports_whitespace_only_string_field_as_empty(tmp_path):
-    bad = tmp_path / "bad.json"
-    bad.write_text(
-        '{"name":"x","description":"   \\t\\n","version":"1","skills":[{"id":"s"}],'
-        '"securitySchemes":{"o":{}},'
-        '"supportedInterfaces":[{"url":"https://x","protocolVersion":"1.0"}]}'
-    )
+    bad = _write_card(tmp_path, description="   \t\n")
     with pytest.raises(CardError, match="present but empty: description") as excinfo:
         load_card(bad)
     assert "missing" not in str(excinfo.value)
 
 
 def test_load_reports_nbsp_only_string_field_as_empty(tmp_path):
-    bad = tmp_path / "bad.json"
-    bad.write_text(
-        '{"name":"x","description":"\\u00a0","version":"1","skills":[{"id":"s"}],'
-        '"securitySchemes":{"o":{}},'
-        '"supportedInterfaces":[{"url":"https://x","protocolVersion":"1.0"}]}'
-    )
-    with pytest.raises(CardError, match="present but empty: description"):
+    bad = _write_card(tmp_path, description="\u00a0")
+    with pytest.raises(CardError, match="present but empty: description") as excinfo:
         load_card(bad)
+    assert "missing" not in str(excinfo.value)
 
 
 def test_load_accepts_zwsp_only_string_field(tmp_path):
-    # Zero-width characters are intentionally not treated as whitespace (#117);
-    # this pins str.strip() semantics against a reimplementation of the check.
-    card = tmp_path / "card.json"
-    card.write_text(
-        '{"name":"x","description":"\\u200b","version":"1","skills":[{"id":"s"}],'
-        '"securitySchemes":{"o":{}},'
-        '"supportedInterfaces":[{"url":"https://x","protocolVersion":"1.0"}]}'
-    )
+    # Zero-width characters are intentionally not treated as whitespace.
+    card = _write_card(tmp_path, description="\u200b")
     assert load_card(card)["description"] == "\u200b"
 
 
@@ -124,31 +115,23 @@ def test_read_card_non_object_message(tmp_path, payload):
 
 
 def test_load_rejects_non_object_interface_entry(tmp_path):
-    bad = tmp_path / "bad.json"
-    bad.write_text(
-        '{"name":"x","description":"d","version":"1","skills":[{"id":"s"}],'
-        '"securitySchemes":{"o":{}},"supportedInterfaces":["s"]}'
-    )
+    bad = _write_card(tmp_path, supportedInterfaces=["s"])
     with pytest.raises(CardError, match="interface entry must be an object"):
         load_card(bad)
 
 
 def test_load_rejects_non_string_interface_url(tmp_path):
-    bad = tmp_path / "bad.json"
-    bad.write_text(
-        '{"name":"x","description":"d","version":"1","skills":[{"id":"s"}],'
-        '"securitySchemes":{"o":{}},"supportedInterfaces":[{"url":123}]}'
-    )
+    bad = _write_card(tmp_path, supportedInterfaces=[{"url": 123}])
     with pytest.raises(CardError, match="interface url must be a string"):
         load_card(bad)
 
 
 def test_load_rejects_plaintext_interface(tmp_path):
-    bad = tmp_path / "bad.json"
-    bad.write_text(
-        '{"name":"x","description":"d","version":"1","skills":[{"id":"s"}],'
-        '"securitySchemes":{"o":{}},'
-        '"supportedInterfaces":[{"url":"http://x","protocolBinding":"JSONRPC","protocolVersion":"1.0"}]}'
+    bad = _write_card(
+        tmp_path,
+        supportedInterfaces=[
+            {"url": "http://x", "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}
+        ],
     )
     with pytest.raises(CardError):
         load_card(bad)
