@@ -55,6 +55,11 @@ def _cmd_sign(args: argparse.Namespace) -> int:
         )
         os.close(fd)
         tmp_out = Path(tmp_name)
+        # mkstemp forces 0600; a signed card is public served content, so restore
+        # the umask-derived permissions a normal create would have produced.
+        umask = os.umask(0)
+        os.umask(umask)
+        tmp_out.chmod(0o666 & ~umask)
         tmp_out.write_text(json.dumps(signed, indent=2))
         tmp_out.replace(args.out_path)
     except OSError as exc:

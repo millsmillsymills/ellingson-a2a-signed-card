@@ -145,6 +145,16 @@ def test_sign_over_existing_target_replaces_content(tmp_path):
     assert list(tmp_path.iterdir()) == [out]
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="umask has no practical effect as root")
+def test_sign_output_is_world_readable_not_owner_only(tmp_path):
+    out = tmp_path / "signed.json"
+    rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
+    assert rc == 0
+    umask = os.umask(0)
+    os.umask(umask)
+    assert out.stat().st_mode & 0o777 == 0o666 & ~umask
+
+
 def test_sign_does_not_clobber_unrelated_tmp_file(tmp_path):
     out = tmp_path / "signed.json"
     bystander = tmp_path / "signed.json.tmp"
