@@ -107,18 +107,29 @@ def test_sign_out_path_is_directory_errors_cleanly(tmp_path, capsys):
     assert rc == 1
     assert "Traceback" not in err
     assert f"cannot write signed card {tmp_path}" in err
+    assert not list(tmp_path.parent.glob(f"{tmp_path.name}*.tmp"))
 
 
 def test_sign_write_failure_mid_write_leaves_target_untouched(tmp_path, capsys, monkeypatch):
     out = tmp_path / "signed.json"
     out.write_text("previous signed card")
+    real_fdopen = os.fdopen
 
-    def partial_write_then_enospc(self, text, *args, **kwargs):
-        with self.open("w") as fh:
-            fh.write(text[:10])
-        raise OSError(28, "No space left on device")
+    class PartialWriter:
+        def __init__(self, handle):
+            self._handle = handle
 
-    monkeypatch.setattr(Path, "write_text", partial_write_then_enospc)
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return self._handle.__exit__(*exc_info)
+
+        def write(self, text):
+            self._handle.write(text[:10])
+            raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(os, "fdopen", lambda fd, *a, **kw: PartialWriter(real_fdopen(fd, *a, **kw)))
     rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
     err = capsys.readouterr().err
     assert rc == 1
@@ -133,6 +144,54 @@ def test_sign_success_leaves_only_the_signed_card(tmp_path):
     rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
     assert rc == 0
     assert list(tmp_path.iterdir()) == [out]
+
+
+def test_sign_over_existing_target_replaces_content(tmp_path):
+    out = tmp_path / "signed.json"
+    out.write_text("stale signed card")
+    rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
+    assert rc == 0
+    signed = json.loads(out.read_text())
+    assert signed["signatures"]
+    assert list(tmp_path.iterdir()) == [out]
+
+
+def test_sign_output_permissions_follow_umask(tmp_path):
+    out = tmp_path / "signed.json"
+    # Pin the umask so the expected mode (0644) differs from mkstemp's 0600
+    # default — otherwise the test passes with the fchmod restore deleted.
+    old_umask = os.umask(0o022)
+    try:
+        rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
+    finally:
+        os.umask(old_umask)
+    assert rc == 0
+    assert out.stat().st_mode & 0o777 == 0o644
+
+
+def test_sign_fchmod_failure_cleans_up_temp_file(tmp_path, capsys, monkeypatch):
+    out = tmp_path / "signed.json"
+
+    def boom(fd, mode):
+        raise OSError(1, "Operation not permitted")
+
+    monkeypatch.setattr(os, "fchmod", boom)
+    rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "Traceback" not in err
+    assert f"cannot write signed card {out}" in err
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_sign_does_not_clobber_unrelated_tmp_file(tmp_path):
+    out = tmp_path / "signed.json"
+    bystander = tmp_path / "signed.json.tmp"
+    bystander.write_text("unrelated file")
+    rc = main(["sign", "--in", str(CARD_PATH), "--out", str(out), "--identity", IDENTITY])
+    assert rc == 0
+    assert bystander.read_text() == "unrelated file"
+    assert sorted(tmp_path.iterdir()) == [out, bystander]
 
 
 def test_sign_empty_required_field_errors_cleanly(tmp_path, capsys):
