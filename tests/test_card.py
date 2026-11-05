@@ -79,7 +79,8 @@ def test_load_reports_nbsp_only_string_field_as_empty(tmp_path):
 
 
 def test_load_accepts_zwsp_only_string_field(tmp_path):
-    # Zero-width characters are intentionally not treated as whitespace.
+    # Zero-width characters are intentionally not treated as whitespace;
+    # this pins str.strip() semantics against a reimplementation of the check.
     card = _write_card(tmp_path, description="\u200b")
     assert load_card(card)["description"] == "\u200b"
 
