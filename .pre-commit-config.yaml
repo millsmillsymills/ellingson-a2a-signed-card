@@ -5,3 +5,12 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: claude-settings-guard
+        name: Check staged Claude settings
+        entry: python3 .github/security/check_claude_settings.py --staged
+        language: system
+        pass_filenames: false
+        always_run: true

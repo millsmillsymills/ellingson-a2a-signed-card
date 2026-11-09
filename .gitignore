@@ -8,3 +8,6 @@ dist/
 signed-card.json
 build/
 docs/superpowers/
+
+# Claude Code local settings can contain machine-specific permissions and secrets.
+**/.claude/settings.local.json
